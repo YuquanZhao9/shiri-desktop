@@ -1,0 +1,198 @@
+/* Only the dedicated #desktop surface uses the wallpaper calendar layout. */
+html.desktop-surface, .desktop-surface body, .desktop-surface #root { background: transparent; }
+html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%, transparent 48%), linear-gradient(125deg, #3b5865, #293b4c 70%, #283646); }
+.app.desktop-calendar { --line: #ffffff24; display: grid; grid-template-columns: minmax(0, 1fr); height: 100dvh; min-height: 0; background: transparent; padding: 24px 28px 12px; color: #f1f5fb; gap: 22px; overflow: hidden; }
+.app.desktop-calendar.hours-open { grid-template-columns: minmax(400px, 1fr) 360px; }
+.desktop-calendar .main { min-width: 0; background: transparent; border: 0; }
+.widget-heading { height: 66px; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.widget-month { display: flex; align-items: center; gap: 12px; white-space: nowrap; text-shadow: 0 1px 8px #0004; }
+.widget-month>svg { color: #d8e4f8; }
+.widget-month h1 { font-size: 22px; font-weight: 400; margin: 0; letter-spacing: .3px; color: #f8fbff; }
+.widget-month h1 strong { font-weight: 600; }
+.widget-month>span { font-size: 12px; color: #d8e4efbb; margin-left: 4px; }
+.widget-controls { display: flex; gap: 4px; align-items: center; }
+.widget-controls button, .desktop-hours header>button, .hours-tools button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 6px; color: #edf4ff; font-size: 11px; white-space: nowrap; }
+.widget-controls button:hover, .widget-controls button.active, .desktop-hours header>button:hover, .hours-tools button:hover { background: #ffffff20; }
+.widget-controls i { width: 1px; height: 18px; background: #ffffff2a; margin: 0 8px; }
+.desktop-calendar .calendar-body { padding: 0; }
+.desktop-calendar .weekdays { background: #17243320; border-color: #ffffff24; }
+.desktop-calendar .weekdays span { color: #e5eef7bd; text-align: left; font-size: 11px; padding: 14px 12px; }
+.desktop-calendar .weekdays .weekend { color: #c9daef9e; }
+.desktop-calendar .month-grid { border-radius: 9px; grid-template-rows: repeat(6, minmax(0, 1fr)); overflow: hidden; }
+.desktop-calendar .day-cell { background: #17243320; min-height: 0; padding: 9px 7px 5px; }
+.desktop-calendar .day-cell:hover { background: #ffffff17; }
+.desktop-calendar .day-cell.outside { background: #17243330; }
+.desktop-calendar .day-cell.selected { background: #ffffff18; box-shadow: inset 0 0 0 1px #e7efff72; }
+.desktop-calendar .day-cell.today { background: #819abc25; }
+.desktop-calendar .day-cell.dragover { background: #91b4ff55; box-shadow: inset 0 0 0 2px #c9dcff; }
+.desktop-calendar .cell-top { justify-content: flex-start; flex-wrap: nowrap; gap: 6px; padding: 0 3px; margin-bottom: 6px; }
+.desktop-calendar .day-number { color: #edf5ff; font-size: 14px; width: 27px; height: 27px; text-shadow: 0 1px 5px #0004; }
+.desktop-calendar .today .day-number { color: #304666; background: #e4edfc; text-shadow: none; }
+.desktop-calendar .lunar { display: block; font-size: 9px; color: #d9e6f2a0; }
+.desktop-calendar .day-cell.outside .day-number, .desktop-calendar .day-cell.outside .lunar { color: #c9d8e06b; }
+.desktop-calendar .cell-add { top: 12px; right: 8px; color: #edf5ff; background: #ffffff20; }
+.desktop-calendar .calendar-event { font-size: 11px; min-height: 25px; color: #eef4ff; background: color-mix(in srgb, var(--event-color) 35%, #1e304850); padding: 5px 6px; }
+.desktop-calendar .calendar-event:hover { background: color-mix(in srgb, var(--event-color) 55%, #1e304870); }
+.desktop-calendar .calendar-event small { display: inline; font-size: 9px; color: #f5f8ffce; }
+.desktop-calendar .calendar-event i { background: color-mix(in srgb, var(--event-color), white 35%); }
+.desktop-calendar .more-events { font-size: 10px; line-height: 13px; color: #e2ebf7bd; }
+.desktop-calendar .calendar-footer { color: #d7e3eea6; padding: 13px 0 4px; font-size: 10px; }
+.desktop-calendar .calendar-footer>span:last-child { display: flex; }
+.desktop-calendar .hint-dot { background: #d9e6f4a6; }
+.desktop-hours { display: flex; flex-direction: column; min-height: 0; min-width: 0; margin-top: 14px; margin-bottom: 12px; border: 1px solid #ffffff30; border-radius: 12px; background: #172b40df; box-shadow: 0 8px 30px #10203915; overflow: hidden; }
+.desktop-hours>header { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 8px; }
+.desktop-hours header small { color: #b6c7dc; font-size: 10px; }
+.desktop-hours h2 { color: #edf5ff; font-size: 16px; font-weight: 500; margin: 8px 0; }
+.hours-tools { display: flex; align-items: center; gap: 4px; padding: 0 13px 11px; }
+.hours-tools span { color: #cbd9e8; font-size: 11px; }
+.hours-tools button:last-child { margin-left: auto; }
+.desktop-hours .day-view { margin: 0; border: 0; border-radius: 0; }
+.desktop-hours .all-day { background: #ffffff08; border-color: #ffffff20; }
+.desktop-hours .all-day>span { color: #b1c4d9; width: 30px; }
+.desktop-hours .all-day-add { color: #cfdef2; }
+.desktop-hours .compact.task-row { background: #ffffff13; }
+.desktop-hours .task-text>span { color: #e3ecf7; }
+.desktop-hours .time-gutter { background: transparent; width: 48px; }
+.desktop-hours .time-gutter>span { color: #b7cbe0; font-size: 10px; }
+.desktop-hours .time-slot { border-color: #ffffff20; }
+.desktop-hours .time-slot.half { border-color: #ffffff0d; }
+.desktop-hours .time-slot:hover { background: #ffffff0b; }
+.desktop-hours .timeline-event { background: color-mix(in srgb, var(--event-color) 45%, #213750); color: #f0f6ff; }
+.desktop-hours .timeline-event:hover { background: color-mix(in srgb, var(--event-color) 65%, #213750); }
+.desktop-calendar .modal-overlay { background: #14243555; }
+.desktop-calendar .load-notice { left: 28px; top: 95px; border-radius: 8px; }
+@media(max-width:1180px) { .widget-month>span { display:none; } .app.desktop-calendar { padding: 15px 18px 8px; gap: 14px; } .app.desktop-calendar.hours-open { grid-template-columns:minmax(380px,1fr) 320px; } .widget-month h1 { font-size: 18px; } .widget-controls { gap: 0; } .widget-controls button { padding: 7px 5px; font-size: 10px; } .widget-controls i { margin: 0 4px; } .desktop-calendar .calendar-event { font-size: 10px; } }
+@media(max-width:850px) { .app.desktop-calendar.hours-open { grid-template-columns:minmax(0,1fr); } .desktop-hours { position:fixed; right:16px; top:85px; bottom:22px; width:min(360px,calc(100vw - 32px)); z-index:20; margin:0; box-shadow:0 12px 45px #10203975; } .desktop-calendar .calendar-footer>span:last-child { display:none; } .widget-month>svg { display:none; } .widget-month { gap:6px; } .widget-heading { gap:8px; } }
+
+/* The visual calendar fills the work area. Electron passes mouse input through
+   empty cells, while headings and event controls remain interactive. */
+.app.desktop-calendar { background:transparent; border:0; border-radius:0; box-shadow:none; backdrop-filter:none; padding:2px 14px 3px; gap:0; }
+.desktop-calendar .widget-heading { height:54px; gap:8px; padding:0 12px; background:#163244a8; }
+.desktop-calendar .weekdays { background:#173444b8; }
+.desktop-calendar .day-cell { background:#152e3f8a; }
+.desktop-calendar .day-cell:hover { background:#30516b9e; }
+.desktop-calendar .day-cell.outside { background:#18354470; }
+.desktop-calendar .day-cell.selected { background:#40586daa; }
+.desktop-calendar .day-cell.today { background:#36515ba6; }
+.desktop-calendar .widget-month { gap:7px; }
+.desktop-calendar .widget-month h1 { font-size:17px; }
+.desktop-calendar .widget-controls { gap:2px; }
+.desktop-calendar .widget-controls>button { padding:6px; font-size:11px; }
+.widget-span-switch { display:flex; align-items:center; gap:1px; border:1px solid #ffffff30; border-radius:6px; padding:2px; }
+.widget-span-switch button { padding:5px 7px; border-radius:4px; font-size:10px; white-space:nowrap; color:#d8e7f4; }
+.widget-span-switch button.active { color:#fff; background:#ffffff28; }
+.desktop-calendar[data-span='week'] .month-grid { grid-template-rows:minmax(0,1fr); }
+.desktop-calendar[data-span='twoWeeks'] .month-grid { grid-template-rows:repeat(2,minmax(0,1fr)); }
+.desktop-calendar[data-span='month'] .month-grid { grid-template-rows:repeat(6,minmax(0,1fr)); }
+.desktop-calendar .weekdays span { padding:8px 9px; }
+.desktop-calendar .calendar-footer { padding:7px 0 2px; }
+.desktop-calendar .calendar-footer>span:last-child { display:none; }
+.desktop-calendar .day-cell { padding:6px 4px 3px; }
+.desktop-calendar .day-cell { cursor:default; }
+.desktop-calendar .cell-top { margin-bottom:4px; cursor:pointer; }
+.desktop-calendar .calendar-event { min-height:21px; padding:3px 4px; }
+.app.editor-only { display:block; height:100dvh; min-height:0; background:#f7f8fb; }
+.app.editor-only>:not(.modal-overlay) { display:none !important; }
+.app.editor-only .modal-overlay { background:transparent; backdrop-filter:none; padding:12px; }
+.app.editor-only .modal { max-height:calc(100dvh - 24px); box-shadow:0 8px 32px #24325318; }
+
+/* Use every pixel of the Windows work area; editing stays inside its date cell. */
+.app.desktop-calendar { padding:0; }
+.desktop-calendar .widget-heading { flex-shrink:0; }
+.desktop-calendar .weekdays { border-radius:0; }
+.desktop-calendar .month-grid { border-radius:0; }
+.desktop-calendar .calendar-footer { display:none; }
+.desktop-calendar .day-cell { cursor:pointer; }
+.desktop-inline-editor { position:absolute; inset:0; z-index:10; display:flex; flex-direction:column; gap:7px; padding:10px; min-width:0; overflow:auto; color:#eef6ff; background:#1c3448f2; box-shadow:inset 0 0 0 2px #d5e6f0a8; cursor:auto; }
+.desktop-inline-editor * { cursor:auto; }
+.desktop-inline-editor button { cursor:pointer; }
+.inline-editor-heading { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:25px; font-size:12px; }
+.inline-editor-heading button { display:flex; align-items:center; justify-content:center; padding:3px; border-radius:4px; }
+.inline-editor-heading>span { display:flex; align-items:center; gap:2px; flex:none; }
+.inline-editor-heading strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.inline-editor-heading strong.inline-editor-message { white-space:normal; color:#ffd9a8; font-weight:500; }
+.inline-editor-quick { display:flex; align-items:center; gap:5px; }
+.inline-editor-quick input { flex:1 1 auto; }
+.inline-editor-quick button { flex:none; min-height:29px; padding:4px 9px; border-radius:5px; color:#f0f6ff; background:#ffffff1e; font-size:11px; }
+.inline-editor-quick button[type=submit] { background:#bed5ee; color:#182c41; font-weight:600; }
+.desktop-inline-editor input,.desktop-inline-editor select,.desktop-inline-editor textarea { width:100%; min-width:0; min-height:29px; padding:5px 7px; border:1px solid #a9c3d779; border-radius:5px; color:#f7fbff; background:#12283ac7; font-size:12px; }
+.desktop-inline-editor input::placeholder,.desktop-inline-editor textarea::placeholder { color:#cad9e6a0; }
+.desktop-inline-editor input[type=date],.desktop-inline-editor input[type=time] { color-scheme:dark; }
+.desktop-inline-editor select option { background:#1c3448; }
+.inline-editor-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+.inline-editor-fields label { min-width:0; color:#d2e1ed; font-size:10px; }
+.inline-editor-fields label input,.inline-editor-fields label select { margin-top:3px; }
+.desktop-inline-editor textarea { min-height:42px; resize:vertical; flex:1; }
+.inline-editor-actions { display:flex; justify-content:flex-end; align-items:center; gap:5px; margin-top:auto; }
+.inline-editor-actions button { min-height:26px; padding:4px 8px; border-radius:4px; color:#f0f6ff; background:#ffffff1e; font-size:11px; }
+.inline-editor-actions button[type=submit] { background:#bed5ee; color:#182c41; font-weight:600; }
+.inline-editor-actions button:first-child:not(:last-child) { margin-right:auto; }
+.app.cell-editor-surface { display:block; height:100dvh; min-height:0; overflow:hidden; background:#1c3448; }
+.app.cell-editor-surface>:not(.desktop-inline-editor) { display:none !important; }
+.app.cell-editor-surface .desktop-inline-editor { inset:0; }
+
+/* Official holidays (休) and make-up workdays (班), festival names in place of the lunar day. */
+.day-mark { flex:none; padding:0 4px; border-radius:3px; font-size:10px; line-height:15px; font-weight:600; }
+.day-mark.rest { color:#fff; background:#d8574f; }
+.day-mark.work { color:#fff; background:#5b6b82; }
+.lunar.festival { color:#e2665d; font-weight:500; }
+.desktop-calendar .lunar.festival { color:#ffb7a8; }
+.desktop-calendar .day-cell.rest-day { background-image:linear-gradient(#d8574f1f,#d8574f1f); }
+.desktop-calendar .cell-top .day-mark { margin-right:26px; }
+.de-holiday { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:0 4px; border-radius:3px; font-size:10px; line-height:15px; color:#fff; background:#3f6fc4; }
+.desktop-calendar .cell-top .de-holiday { margin-right:26px; }
+.desktop-calendar .cell-top .day-mark + .de-holiday { margin-left:-22px; }
+/* Notes are visible on the calendar under each event title. */
+.calendar-event { flex-wrap:wrap; }
+.calendar-event .event-notes { order:1; flex-basis:100%; min-width:0; padding-left:7px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-style:normal; font-size:.9em; opacity:.75; }
+.calendar-event.done .event-notes { text-decoration:line-through; }
+.desktop-inline-editor.compact textarea { display:block; min-height:44px; flex:none; resize:none; }
+
+/* Cells stretch their event list and hide only what does not fit (CellTasks). */
+.day-cell { display:flex; flex-direction:column; }
+.day-cell .cell-tasks { flex:1 1 auto; min-height:0; overflow:hidden; }
+
+/* Color tags. */
+.color-swatches { display:flex; flex-wrap:wrap; align-items:center; gap:5px; }
+.color-swatches .swatch { width:16px; height:16px; padding:0; border-radius:50%; border:2px solid transparent; background:var(--swatch); box-shadow:0 0 0 1px #0000001a; cursor:pointer; }
+.color-swatches .swatch.list-color { background:linear-gradient(135deg, var(--swatch) 50%, #ffffff 50%); }
+.color-swatches .swatch.selected { border-color:#ffffff; box-shadow:0 0 0 2px var(--swatch); }
+.task-modal .color-swatches { margin:10px 0 2px; }
+.task-modal .color-swatches .swatch.selected { border-color:#fff; }
+
+/* Weekly class timetable under the desktop calendar. */
+.timetable-strip { flex:none; display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); max-height:128px; border-top:1px solid #ffffff30; background:#13263699; color:#eaf2fb; font-size:11px; }
+.timetable-day { display:flex; flex-direction:column; gap:3px; min-width:0; padding:6px 5px; border-right:1px solid #ffffff14; overflow:hidden; }
+.timetable-day.today { background:#ffffff12; }
+.timetable-day em { color:#c9d8e67a; font-style:normal; font-size:10px; }
+.timetable-slot { display:flex; align-items:center; gap:5px; min-width:0; padding:2px 6px; border-radius:4px; border:1px solid transparent; border-left:3px solid var(--slot-color); background:color-mix(in srgb, var(--slot-color) 26%, transparent); }
+.timetable-slot.dashed { border:1px dashed var(--slot-color); border-left-width:3px; background:color-mix(in srgb, var(--slot-color) 10%, transparent); }
+.timetable-slot small { flex:none; color:#d6e3f0c4; font-size:9px; }
+.timetable-slot span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.timetable-legend { grid-column:span 2; display:flex; flex-direction:column; gap:2px; min-width:0; padding:6px 8px; overflow:hidden; font-size:10px; color:#d6e3f0d9; }
+.timetable-legend strong { display:flex; gap:6px; align-items:baseline; font-size:11px; color:#f1f6fc; }
+.timetable-legend strong small { font-weight:400; color:#c9d8e6a8; }
+.timetable-legend span { display:flex; align-items:center; gap:5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.timetable-legend i { flex:none; width:8px; height:8px; border-radius:2px; }
+
+/* Timetable editor in 设置. */
+.timetable-term { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:8px 0; }
+.timetable-rows { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
+.timetable-row { display:grid; grid-template-columns:62px 84px 84px minmax(80px,1fr) minmax(80px,1.3fr) 34px 56px 30px; gap:6px; align-items:center; }
+.timetable-row.legend-row { grid-template-columns:80px minmax(120px,1fr) 34px 30px; }
+.timetable-row input[type=color] { width:32px; height:28px; padding:1px; }
+.timetable-row .dashed-toggle { display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; }
+
+/* Classes inside each day cell, one row per period; empty periods stay as faint outlines. */
+.cell-classes { flex:0 1 auto; min-height:0; display:grid; grid-auto-rows:minmax(9px, 19px); gap:2px; margin-top:4px; overflow:hidden; }
+.class-period { display:flex; align-items:stretch; gap:3px; min-height:0; min-width:0; }
+.class-period small { flex:none; width:30px; align-self:center; font-size:9px; line-height:1; color:#d6e3f0a0; }
+.class-period.empty { border:1px dashed #ffffff26; border-radius:3px; }
+.class-period.empty small { padding-left:3px; color:#d6e3f066; }
+.class-chip { flex:1 1 0; min-width:0; display:flex; align-items:center; padding:0 5px; border-radius:3px; border-left:3px solid var(--slot-color); background:color-mix(in srgb, var(--slot-color) 30%, transparent); color:#eef5fc; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.class-chip.dashed { border:1px dashed var(--slot-color); border-left:3px dashed var(--slot-color); background:color-mix(in srgb, var(--slot-color) 10%, transparent); }
+.desktop-calendar[data-span='month'] .class-period small { display:none; }
+.timetable-breaks { display:flex; flex-direction:column; gap:6px; margin:10px 0; }
+.timetable-row.break-row { grid-template-columns:minmax(120px,1fr) 140px 140px 30px; }
+.class-chip.alert { box-shadow:inset 0 0 0 1px #ffc86b; }
+.class-chip b { flex:none; margin-right:3px; color:#ffcf73; font-weight:700; }

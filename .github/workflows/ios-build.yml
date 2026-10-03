@@ -1,0 +1,98 @@
+name: Build iPhone IPA (unsigned)
+
+# Manual runs only. This workflow never requests Apple credentials or signs an app.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  iphone:
+    name: Compile arm64 iPhone app
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      SHIRI_XCODE_VERSION: '26.6'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Official release tags and commit objects verified through api.github.com
+      # on 2026-09-14. Keep the full commit pin when upgrading an action.
+      - name: Check out selected source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Expand uploaded source archive when present
+        run: |
+          if [[ -f source.zip ]]; then
+            python3 - <<'PY'
+          import pathlib
+          import zipfile
+          with zipfile.ZipFile('source.zip') as archive:
+              for item in archive.infolist():
+                  name = pathlib.PurePosixPath(item.filename)
+                  if name.is_absolute() or '..' in name.parts or '\\' in item.filename:
+                      raise SystemExit('Unsafe path in source.zip: ' + item.filename)
+                  if (item.external_attr >> 16) & 0o170000 == 0o120000:
+                      raise SystemExit('Symbolic links are not accepted in source.zip')
+          PY
+            unzip -o source.zip -d .
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.20.0'
+          architecture: arm64
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies including macOS native packages
+        run: npm ci --include=optional --no-audit --no-fund
+
+      - name: Compile and verify unsigned iPhone IPA
+        run: bash scripts/build-ios.sh
+
+      - name: Upload IPA requiring personal signing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Shiri-iPhone-unsigned-needs-signing
+          path: |
+            ios/App/output/*-unsigned-iphoneos-arm64.ipa
+            ios/App/output/BUILD-INFO.json
+            ios/App/output/SHA256SUMS.txt
+            ios/App/output/INSTALL-READ-ME.txt
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Upload diagnostic logs if compilation failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Shiri-iPhone-build-logs
+          path: ios/App/output/*.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Explain the generated file
+        if: success()
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ### iPhone build is ready for personal signing
+          Download **Shiri-iPhone-unsigned-needs-signing** from this run's artifacts within 3 days.
+
+          The IPA contains a compiled **arm64 iPhoneOS** app and has passed executable, platform, bundle, icon, privacy and archive checks. It is **unsigned**: it cannot be installed directly or uploaded to TestFlight/App Store until it is signed with your own Apple account using an appropriate signing/install tool. No Apple password, certificate or provisioning profile was used by this workflow.
+          SUMMARY

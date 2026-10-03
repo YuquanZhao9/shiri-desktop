@@ -1,0 +1,66 @@
+{
+  "name": "shiri-calendar",
+  "version": "0.1.1",
+  "private": true,
+  "description": "昱时 · 桌面日历与清单",
+  "author": "Yushi",
+  "type": "module",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build && node scripts/service-worker.mjs",
+    "test": "tsx --test tests/*.test.ts && node --test desktop/reminders.test.cjs desktop/startup.test.cjs tests/ios-package.test.cjs",
+    "desktop": "npm run build && electron .",
+    "pack:win": "npm run build && electron-builder --win portable --x64",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:open": "cap open ios",
+    "icons": "node scripts/icons.mjs"
+  },
+  "build": {
+    "appId": "app.shiri.calendar",
+    "productName": "昱时",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "desktop/*.ps1"
+    ],
+    "win": {
+      "target": "portable",
+      "signExecutable": false,
+      "icon": "desktop/icon.ico"
+    },
+    "portable": {
+      "artifactName": "昱时-${version}-Windows.exe"
+    }
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "@capacitor/local-notifications": "8.3.1",
+    "@capacitor/preferences": "8.0.1",
+    "@supabase/supabase-js": "2.116.0",
+    "lucide-react": "1.45.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2",
+    "@playwright/test": "1.63.0",
+    "@resvg/resvg-js": "2.6.2",
+    "@types/node": "26.5.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.3.0",
+    "electron-builder": "26.15.3",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

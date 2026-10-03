@@ -1,0 +1,13 @@
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const assets=readdirSync('dist/assets').map(file=>'./assets/'+file);
+const icons=readdirSync('dist').filter(file=>file.startsWith('icon')).map(file=>'./'+file);
+const files=['./','./index.html','./manifest.webmanifest',...assets,...icons];
+const version=createHash('sha256').update(readFileSync('dist/index.html')).digest('hex').slice(0,12);
+writeFileSync('dist/sw.js',`const CACHE='shiri-${version}';
+const FILES=${JSON.stringify(files)};
+self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
+self.addEventListener('activate',e=>e.waitUntil(Promise.all([self.clients.claim(),caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('shiri-')&&k!==CACHE).map(k=>caches.delete(k))))])));
+self.addEventListener('fetch',e=>{const u=new URL(e.request.url);if(e.request.method!=='GET'||u.origin!==self.location.origin)return;
+e.respondWith(fetch(e.request).then(r=>{if(r.ok){const copy=r.clone();e.waitUntil(caches.open(CACHE).then(c=>c.put(e.request,copy)));}return r;}).catch(async()=>await caches.match(e.request)||(e.request.mode==='navigate'?await caches.match('./index.html'):Response.error())));});`);
+console.log('Offline app shell precached:',files.length,'files');

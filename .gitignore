@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+release-*/
+*.exe
+*.zip
+.env
+.env.*
+*.local
+test-results/
+# Stray Windows profile folder created by an earlier run (mojibake name)
+/䶈⑇ǫ/
