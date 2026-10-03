@@ -12,6 +12,7 @@
     "test": "tsx --test tests/*.test.ts && node --test desktop/reminders.test.cjs desktop/startup.test.cjs tests/ios-package.test.cjs",
     "desktop": "npm run build && electron .",
     "pack:win": "npm run build && electron-builder --win portable --x64",
+    "pack:mac": "npm run build && electron-builder --mac dir --arm64",
     "ios:sync": "npm run build && cap sync ios",
     "ios:open": "cap open ios",
     "icons": "node scripts/icons.mjs"
@@ -37,6 +38,13 @@
     },
     "portable": {
       "artifactName": "昱时-${version}-Windows.exe"
+    },
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.productivity",
+      "icon": "desktop/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false
     }
   },
   "dependencies": {

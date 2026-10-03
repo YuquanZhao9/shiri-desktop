@@ -565,3 +565,15 @@ test('packaged Windows app adds a Start menu shortcut and turns on launch at log
   assert.equal(turnedOff.loginItems.length, 0, 'Once the user turns it off it stays off');
   assert.equal(turnedOff.writes.length, 0);
 });
+
+test('packaged Mac app turns on launch at login once and skips the Start menu', async () => {
+  const harness = await launch({ packaged: true, platform: 'darwin' });
+  assert.equal(harness.shortcuts_written.length, 0);
+  assert.deepEqual(harness.loginItems.map(item => item.openAtLogin), [true]);
+  const saved = harness.writes.at(-1).value;
+  assert.equal(saved.autostart, true);
+  assert.equal(saved.autostartDefaulted, true);
+
+  const turnedOff = await launch({ packaged: true, platform: 'darwin', saved: { autostart: false, autostartDefaulted: true } });
+  assert.equal(turnedOff.loginItems.length, 0, 'Once the user turns it off it stays off');
+});
