@@ -4,7 +4,7 @@
 
 ## 与电脑版的关系
 
-- 数据格式、重复规则、农历与节假日、日程同步全部直接引用 `../拾日/src`（`core.ts`、`types.ts`、`cloud.ts`、`holidays.ts`、`live-sync.ts`），两端不会各写一套。
+- 数据格式、重复规则、农历与节假日、日程同步全部直接引用 `../src`（`core.ts`、`types.ts`、`cloud.ts`、`holidays.ts`、`live-sync.ts`），两端不会各写一套。
 - 本机存储键与电脑版相同：未登录 `shiri-data:local`，登录后 `shiri-data:<项目地址>:<账号 ID>`。
 - 偏好键与电脑版相同：`shiri-reminder-lead`（提前提醒分钟）、`shiri-de-state`（德国联邦州）。
 
@@ -13,6 +13,14 @@
 - 日程：沿用 `cloud/schema.sql` 的 `shiri_tasks` 表和 `merge_tasks`（按更新时间合并，删除保留墓碑）。
 - 清单名称和颜色：`cloud/schema-v2.sql` 新增 `shiri_lists` 表和 `merge_lists`；只上传本机改过的清单，占位名"同步清单 N"不会上传。
 - 实时：`schema-v2.sql` 把两张表加入 Supabase Realtime；一端保存后另一端约 1–2 秒内收到。手机回到前台、网络恢复、每分钟也会补一次同步。
+
+## 密码恢复
+
+- “我的 → 云同步 → 忘记密码”会向填写的邮箱发送 Supabase 恢复邮件。
+- 邮件链接返回 `https://yuquanzhao9.github.io/yushi-app/?password-reset=1`，网页识别恢复会话后显示两次新密码输入框。
+- 注册时若 Supabase 明确返回重复邮箱，或在邮箱确认开启时返回空 `identities` 的伪装账号，页面会提示“该邮箱已被注册”，再由用户选择是否发送重置邮件。
+- Supabase Authentication 的 Site URL 应设为网页地址，并把 `https://yuquanzhao9.github.io/yushi-app/**` 加入 Redirect URLs。
+- 修改密码不会改变账号 ID；本机数据仍保存在按项目地址和账号 ID 命名的原存储空间。
 
 ## 提醒（iPhone 需要 iOS 16.4 以上，且必须从主屏幕图标打开）
 
@@ -24,7 +32,7 @@
 
 ## 部署步骤
 
-1. Supabase SQL：依次运行 `../拾日/cloud/schema.sql`、`../拾日/cloud/schema-v2.sql`。
+1. Supabase SQL：依次运行 `../cloud/schema.sql`、`../cloud/schema-v2.sql`。
 2. 生成 VAPID 密钥：`npx web-push generate-vapid-keys`。
 3. 函数密钥：`VAPID_PUBLIC_KEY`、`VAPID_PRIVATE_KEY`、`CRON_SECRET`（随机串）。
 4. 部署函数：`npx supabase functions deploy shiri-reminders --project-ref <ref> --no-verify-jwt --use-api`。

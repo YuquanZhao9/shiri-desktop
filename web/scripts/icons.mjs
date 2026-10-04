@@ -1,7 +1,7 @@
 // 生成网页版图标（“日历对勾”方案）。用法：node scripts/icons.mjs
 import { writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-const require = createRequire(new URL('../../拾日/package.json', import.meta.url));
+const require = createRequire(new URL('../../package.json', import.meta.url));
 const { Resvg } = require('@resvg/resvg-js');
 
 const body = '<rect x="52" y="66" width="152" height="140" rx="22" fill="#fff"/><path d="M52 88a22 22 0 0 1 22-22h108a22 22 0 0 1 22 22v18H52z" fill="#FF6B5B"/><rect x="86" y="50" width="16" height="34" rx="8" fill="#fff"/><rect x="154" y="50" width="16" height="34" rx="8" fill="#fff"/><path d="M94 152 L118 176 L164 128" fill="none" stroke="#2E5BE8" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>';

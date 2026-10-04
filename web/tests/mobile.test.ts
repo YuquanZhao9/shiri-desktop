@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, isDone as coreIsDone, occursOn as coreOccursOn } from '../../拾日/src/core.ts';
-import type { Task } from '../../拾日/src/types.ts';
+import { addDays, isDone as coreIsDone, occursOn as coreOccursOn } from '../../src/core.ts';
+import type { Task } from '../../src/types.ts';
 import { dueReminders, isDone, occursOn, zonedDateKey, zonedTime } from '../supabase/functions/shiri-reminders/schedule.ts';
-import { applyRemoteLists, planListSync } from '../../拾日/src/live-sync.ts';
+import { applyRemoteLists, planListSync } from '../../src/live-sync.ts';
 
 const base: Task = { id: 't1', title: '开会', date: '2026-01-31', time: '09:30', duration: 60, listId: 'work', notes: '', priority: 'normal', repeat: 'none', completed: false, doneDates: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
 

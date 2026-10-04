@@ -19,7 +19,7 @@ export function cloudConfig(): CloudConfig | null {
 }
 
 export function saveCloudConfig(url: string, key: string): SupabaseClient {
-  const client = createCloudClient(url.trim(), key.trim());
+  const client = createCloudClient(url.trim(), key.trim(), { detectSessionInUrl: true });
   localStorage.setItem(URL_KEY, url.trim());
   localStorage.setItem(KEY_KEY, key.trim());
   return client;

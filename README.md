@@ -102,7 +102,7 @@ iPhone 原生版最多预排未来 **30 天中最近 60 条**本地提醒，打�
 
 1. 在自己的 Supabase 项目中打开 SQL Editor，执行完整的 `cloud/schema.sql`。脚本创建任务表、各操作的所有者 RLS 规则和防旧版本覆盖的合并函数，可重复执行。
 2. 在 Authentication 的 Email 配置中启用邮箱密码登录，并按你的需要允许注册。建议保留邮箱确认；配置可接收验证邮件的 SMTP 服务，生产邮件不要依赖测试额度。
-3. 在 Authentication 的 URL Configuration 中设置自己控制的 Site URL，作为验证邮件的完成落地页。当前应用不自动接管邮件回调：用户完成邮箱验证后，返回昱时使用邮箱密码登录即可。若配置额外跳转地址，需加入允许的 Redirect URLs。[Supabase 邮箱密码配置](https://supabase.com/docs/guides/auth/passwords)
+3. 在 Authentication 的 URL Configuration 中把 `https://yuquanzhao9.github.io/yushi-app/` 设为 Site URL，并允许 `https://yuquanzhao9.github.io/yushi-app/**` 作为 Redirect URL。登录页可发送密码恢复邮件；邮件链接返回网页版后显示新密码表单。用户完成邮箱验证后，也可返回昱时使用邮箱密码登录。[Supabase 邮箱密码配置](https://supabase.com/docs/guides/auth/passwords)
 4. 在昱时「设置与同步 → 连接云项目」填入该项目的 HTTPS URL 和 **Publishable key / 旧版 anon key**。不能填写 Secret key 或 service_role 密钥。
 5. 在 Windows 和 iPhone 上填写同一项目配置、登录同一账号。登录不会自动上传原来未登录空间的数据；需要时点击「将本机任务合并到此账号」。
 
@@ -115,7 +115,7 @@ iPhone 原生版最多预排未来 **30 天中最近 60 条**本地提醒，打�
 - 冲突按客户端 `updatedAt` / `deletedAt` 时间选择较新版本，相同时间优先删除，再使用确定性字段排序；它不是逐字段协作合并。设备时钟严重不准可能影响胜出版本。
 - 删除保留 tombstone，防止离线设备重新上传后恢复旧任务。不要直接清除云表里的删除标记。
 - 目前只同步任务；自定义清单的名称和颜色不自动同步。其他设备对未知清单 ID 使用「同步清单」占位，可通过 JSON 备份携带完整清单元数据。
-- 登录会话保存在当前设备，不提供应用内数据库加密、端到端加密、密码找回页面、账号删除页面或团队共享。
+- 登录会话保存在当前设备。当前提供恢复邮件和已登录修改密码；不提供应用内数据库加密、端到端加密、账号删除页面或团队共享。
 
 ## 设计参考与开源依赖
 

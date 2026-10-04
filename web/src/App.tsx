@@ -6,7 +6,7 @@ import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
 import { breaksOf, classesForDate, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
 import type { PeriodRow } from '@shared/timetable';
-import { createCloudClient, cloudErrorMessage, listsForTasks, syncTasks } from '@shared/cloud';
+import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
 import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncLists, syncTimetable } from './sync';
@@ -35,13 +35,14 @@ const endTime = (time: string, duration: number) => {
   return `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
 const hashDate = () => { const match = /^#date=(\d{4}-\d{2}-\d{2})$/.exec(location.hash); try { return match ? (parseDate(match[1]), match[1]) : ''; } catch { return ''; } };
+const hasPasswordRecoveryLink = () => new URLSearchParams(location.search).get('password-reset') === '1' || /(?:^|&)type=recovery(?:&|$)/.test(location.hash.slice(1));
 
 type Tab = 'calendar' | 'list' | 'timetable' | 'me';
 
 
 export default function App() {
   const [config, setConfig] = useState(cloudConfig);
-  const [client, setClient] = useState<SupabaseClient | null>(() => { try { return config ? createCloudClient(config.url, config.key) : null; } catch { return null; } });
+  const [client, setClient] = useState<SupabaseClient | null>(() => { try { return config ? createCloudClient(config.url, config.key, { detectSessionInUrl: true }) : null; } catch { return null; } });
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const storageKey = user && config ? accountKey(config.url, user.id) : LOCAL_KEY;
@@ -51,7 +52,8 @@ export default function App() {
   const [selected, setSelected] = useState(() => hashDate() || todayKey());
   const [cursor, setCursor] = useState(() => { const d = parseDate(hashDate() || todayKey()); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [compact, setCompact] = useState(() => pref('shiri-m-compact', 'false') === 'true');
-  const [tab, setTab] = useState<Tab>('calendar');
+  const [tab, setTab] = useState<Tab>(() => hasPasswordRecoveryLink() ? 'me' : 'calendar');
+  const [passwordRecovery, setPasswordRecovery] = useState(hasPasswordRecoveryLink);
   const [editing, setEditing] = useState<{ task: Task; isNew: boolean } | null>(null);
   const [quick, setQuick] = useState('');
   const [toast, setToast] = useState<{ text: string; undo?: Task } | null>(null);
@@ -99,7 +101,10 @@ export default function App() {
     if (!client) { setAuthChecked(true); return; }
     let active = true;
     const apply = (next: { id: string; email?: string } | null) => { if (active) { setUser(next); setAuthChecked(true); } };
-    const { data: listener } = client.auth.onAuthStateChange((_event, session) => apply(session?.user ?? null));
+    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') { setPasswordRecovery(true); setTab('me'); }
+      apply(session?.user ?? null);
+    });
     client.auth.getSession().then(({ data: result }) => apply(result.session?.user ?? null)).catch(() => apply(null));
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [client]);
@@ -388,6 +393,12 @@ export default function App() {
             onGermanState={value => { setGermanState(value); setPref('shiri-de-state', value); }} say={say} sync={() => void runSync()}
             onConfig={(url, key) => { const next = saveCloudConfig(url, key); setClient(next); setConfig(cloudConfig()); }}
             onPush={setPushOn}
+            passwordRecovery={passwordRecovery}
+            onRecoveryComplete={() => {
+              setPasswordRecovery(false);
+              const clean = new URL(location.href); clean.searchParams.delete('password-reset'); clean.hash = '';
+              history.replaceState(null, '', `${clean.pathname}${clean.search}`);
+            }}
             onLead={async value => {
               setLead(value); setPref('shiri-reminder-lead', String(value));
               const sub = await currentSubscription();
@@ -513,11 +524,16 @@ interface MeProps {
   syncState: string; data: AppData; pushOn: boolean; lead: number; germanState: GermanState; onGermanState: (value: GermanState) => void;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
+  passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, say, sync, onConfig, onPush, onLead, onMergeLocal }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetOffer, setResetOffer] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState(config?.url ?? '');
   const [key, setKey] = useState(config?.baked ? '' : config?.key ?? '');
@@ -528,10 +544,43 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
     if (!client) return;
     setBusy(true);
     try {
-      const result = mode === 'in' ? await client.auth.signInWithPassword({ email: email.trim(), password }) : await client.auth.signUp({ email: email.trim(), password });
-      if (result.error) throw result.error;
+      if (mode === 'in') await signIn(client, email, password);
+      else {
+        const result = await signUp(client, email, password);
+        if (result.alreadyRegistered) {
+          setResetOffer(email.trim());
+          say('该邮箱已被注册。是否发送重置密码邮件？');
+          return;
+        }
+      }
       setPassword('');
-      say(mode === 'up' && !result.data.session ? '注册成功，请打开邮箱里的确认邮件，然后回来登录' : '已登录，正在同步');
+      setResetOffer('');
+      say(mode === 'up' ? '注册成功，请打开邮箱里的确认邮件，然后回来登录' : '已登录，正在同步');
+    } catch (error) { say(cloudErrorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  async function sendReset(target = email) {
+    if (!client) return;
+    setBusy(true);
+    try {
+      const redirect = location.protocol === 'http:' || location.protocol === 'https:'
+        ? `${location.origin}${location.pathname}?password-reset=1`
+        : PASSWORD_RESET_REDIRECT;
+      await requestPasswordReset(client, target, redirect);
+      setResetOffer('');
+      say('重置邮件已发送。请在邮箱打开链接，设置新密码；当前日程不会被删除。');
+    } catch (error) { say(cloudErrorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  async function saveNewPassword() {
+    if (!client) return;
+    if (newPassword !== confirmPassword) { say('两次输入的新密码不一致。'); return; }
+    setBusy(true);
+    try {
+      await updatePassword(client, newPassword);
+      setNewPassword(''); setConfirmPassword(''); setChangingPassword(false);
+      onRecoveryComplete();
+      say('新密码已保存。账号和现有日程保持不变。');
     } catch (error) { say(cloudErrorMessage(error)); }
     finally { setBusy(false); }
   }
@@ -564,7 +613,14 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
 
         <div className="card">
           <h3><Cloud size={17} />云同步</h3>
-          {!config || showConfig ? (
+          {passwordRecovery ? (
+            <form className="stack" onSubmit={event => { event.preventDefault(); void saveNewPassword(); }}>
+              <p className="muted">正在为当前账号设置新密码。修改密码不会删除手机、电脑或云端日程。</p>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="新密码（至少 8 位）" autoComplete="new-password" />
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" autoComplete="new-password" />
+              <button className="primary" type="submit" disabled={busy || newPassword.length < 8 || confirmPassword.length < 8}>保存新密码</button>
+            </form>
+          ) : !config || showConfig ? (
             <form className="stack" onSubmit={e => { e.preventDefault(); try { onConfig(url, key); setShowConfig(false); say('已连接云项目，请登录'); } catch (error) { say((error as Error).message); } }}>
               <p className="muted">填入 Supabase 项目的地址和 Publishable key（公开密钥）。</p>
               <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" inputMode="url" autoCapitalize="off" autoCorrect="off" />
@@ -580,6 +636,11 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
                 <button className="secondary" onClick={sync}><RefreshCw size={16} />立即同步</button>
                 <button className="secondary" onClick={async () => { if (pushOn) await disablePush(client).catch(() => {}); onPush(false); await client!.auth.signOut({ scope: 'local' }); say('已退出，本机仍保留该账号的数据'); }}><LogOut size={16} />退出</button>
               </div>
+              {changingPassword ? <form className="stack password-change" onSubmit={event => { event.preventDefault(); void saveNewPassword(); }}>
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="新密码（至少 8 位）" autoComplete="new-password" />
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" autoComplete="new-password" />
+                <div className="row-btns"><button className="primary" type="submit" disabled={busy || newPassword.length < 8 || confirmPassword.length < 8}>保存新密码</button><button className="secondary" type="button" onClick={() => { setChangingPassword(false); setNewPassword(''); setConfirmPassword(''); }}>取消</button></div>
+              </form> : <button className="link-btn" onClick={() => setChangingPassword(true)}>修改密码</button>}
               <button className="link-btn" onClick={onMergeLocal}>把未登录时记下的日程并入此账号</button>
             </div>
           ) : (
@@ -591,6 +652,8 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
                 <button className="primary" type="submit" disabled={busy || !email || password.length < 6}>登录</button>
                 <button className="secondary" type="button" disabled={busy || !email || password.length < 6} onClick={() => void auth('up')}>注册</button>
               </div>
+              <button className="link-btn" type="button" disabled={busy || !email} onClick={() => void sendReset()}>忘记密码？发送重置邮件</button>
+              {resetOffer && <div className="reset-offer" role="alert"><p>该邮箱已被注册。是否发送重置密码邮件？</p><div className="row-btns"><button className="primary" type="button" disabled={busy} onClick={() => void sendReset(resetOffer)}>发送重置邮件</button><button className="secondary" type="button" onClick={() => setResetOffer('')}>暂不</button></div></div>}
             </form>
           )}
           {config && !config.baked && !showConfig && <button className="link-btn" onClick={() => setShowConfig(true)}>更改云项目</button>}

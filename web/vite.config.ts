@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 
 // 数据格式、重复规则、节假日和同步逻辑直接取自桌面版源码，保证两端完全一致。
-const shared = fileURLToPath(new URL('../拾日/src', import.meta.url));
+const shared = fileURLToPath(new URL('../src', import.meta.url));
 
 export default defineConfig({
   plugins: [react()],

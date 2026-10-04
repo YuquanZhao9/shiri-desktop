@@ -159,6 +159,9 @@ svg { flex-shrink: 0; }
 .secondary { background: var(--accent-soft); color: var(--accent); }
 .secondary.wide { width: 100%; margin-top: 8px; }
 .link-btn { color: var(--accent); font-size: 14px; padding: 8px 0 0; }
+.reset-offer { border: 1px solid #d9def7; background: var(--accent-soft); border-radius: 12px; padding: 12px; }
+.reset-offer p { margin: 0 0 10px; color: #4a568f; font-size: 14px; line-height: 1.5; }
+.password-change { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
 .footer { text-align: center; color: #b2b6c3; font-size: 12px; margin: 22px 0 0; }
 
 .toast { position: fixed; left: 16px; right: 16px; bottom: calc(var(--tab-h) + var(--safe-bottom) + 14px); background: rgba(40, 43, 58, .94); color: white; border-radius: 12px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; z-index: 30; animation: rise .2s ease-out; }
@@ -179,6 +182,8 @@ svg { flex-shrink: 0; }
   .stack input:focus { background: #262832; }
   .switch { background: #3a3c48; }
   .card.hint { color: #c8cff5; }
+  .reset-offer { border-color: #3d425d; background: #292d42; }
+  .reset-offer p { color: #d2d7f4; }
   .grab { background: #3a3c48; }
 }
 .lunar.german { color: #3d7bd6; }

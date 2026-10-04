@@ -5,7 +5,7 @@
     "strict": true, "skipLibCheck": true, "esModuleInterop": true,
     "allowImportingTsExtensions": true, "noEmit": true,
     "types": ["vite/client", "node"],
-    "paths": { "@shared/*": ["../拾日/src/*"] }
+    "paths": { "@shared/*": ["../src/*"] }
   },
   "include": ["src", "tests", "vite.config.ts"]
 }
