@@ -8,6 +8,8 @@ const shared = fileURLToPath(new URL('../src', import.meta.url));
 export default defineConfig({
   plugins: [react()],
   base: './',
+  // 正式云配置保存在仓库根目录；手机网页从 web/ 构建时也要读取它。
+  envDir: '..',
   resolve: {
     alias: { '@shared': shared },
     // 桌面版 cloud.ts 也引用 supabase-js；只打包一份。
