@@ -94,27 +94,31 @@ npm run ios:open
 
 iPhone 原生版最多预排未来 **30 天中最近 60 条**本地提醒，打开应用或修改任务时更新。长期不打开应用可能耗尽已排提醒；当前没有后台云推送补排。通知权限、系统专注模式和系统调度会影响展示。
 
-也可以将 `dist/` 部署到自己的 HTTPS 网站，用 iPhone Safari「添加到主屏幕」。本次没有发布公网网站；网页版后台提醒不可靠，不能替代原生本地通知。
+手机网页版已发布到 <https://yuquanzhao9.github.io/yushi-app/>，可用 iPhone Safari「添加到主屏幕」。也可以将 `dist/` 部署到自己的 HTTPS 网站；网页推送仍受通知权限、系统策略和云端提醒服务状态影响。
 
 ## 可选：电脑与手机云同步
 
-同步方案已确定使用 Supabase 注册登录，后续再完成注册、项目配置与双端联调。**当前云同步尚未激活**，没有预先部署的云项目，也没有内置任何账号或私钥。不启用同步时，数据保存在当前设备；浏览器清除站点数据会删除该浏览器的本机副本。建议定期导出 JSON。
+注册、登录、重复邮箱处理、密码恢复、数据隔离和安全边界的当前实现见 [注册与账户管理说明](docs/注册与账户管理.md)。
+
+正式 Windows 包和手机网页版已经连接昱时的 Supabase 项目，构建中只包含项目地址和可公开使用的 Publishable key，不包含账号密码、Secret key 或 service_role 密钥。两端登录同一账号即可使用各自的本机副本和云同步；未登录时数据仍保存在当前设备。浏览器清除站点数据会删除该浏览器的本机副本，建议定期导出 JSON。
+
+以下步骤用于重新部署自己的 Supabase 项目或更换项目；正式昱时用户不需要手工填写服务器配置：
 
 1. 在自己的 Supabase 项目中打开 SQL Editor，执行完整的 `cloud/schema.sql`。脚本创建任务表、各操作的所有者 RLS 规则和防旧版本覆盖的合并函数，可重复执行。
 2. 在 Authentication 的 Email 配置中启用邮箱密码登录，并按你的需要允许注册。建议保留邮箱确认；配置可接收验证邮件的 SMTP 服务，生产邮件不要依赖测试额度。
 3. 在 Authentication 的 URL Configuration 中把 `https://yuquanzhao9.github.io/yushi-app/` 设为 Site URL，并允许 `https://yuquanzhao9.github.io/yushi-app/**` 作为 Redirect URL。登录页可发送密码恢复邮件；邮件链接返回网页版后显示新密码表单。用户完成邮箱验证后，也可返回昱时使用邮箱密码登录。[Supabase 邮箱密码配置](https://supabase.com/docs/guides/auth/passwords)
-4. 在昱时「设置与同步 → 连接云项目」填入该项目的 HTTPS URL 和 **Publishable key / 旧版 anon key**。不能填写 Secret key 或 service_role 密钥。
+4. 在自行构建的昱时中填入该项目的 HTTPS URL 和 **Publishable key / 旧版 anon key**，或通过 `VITE_SUPABASE_URL`、`VITE_SUPABASE_KEY` 在构建时写入。不能填写 Secret key 或 service_role 密钥。
 5. 在 Windows 和 iPhone 上填写同一项目配置、登录同一账号。登录不会自动上传原来未登录空间的数据；需要时点击「将本机任务合并到此账号」。
 
 当前通过本机保存加周期性快照合并同步：修改后约 1.8 秒尝试同步，应用运行期间约每 45 秒再检查一次；回到应用、恢复联网或点击同步按钮也会触发。离线编辑保留在本机，重新联网后重试。只有登录成功、SQL 已配置且实际请求成功，才能确认双端同步可用。
 
-数据库仅允许用户访问自己的任务；RPC 再核验预期账号。云端数据和导入备份使用相同的任务校验。实现与 SQL 已在本地 PostgreSQL WASM 引擎中测试账号隔离、旧版本保护、删除标记和相同时间冲突一致性，**尚未使用真实 Supabase 账号进行双端联调**。[RLS 官方说明](https://supabase.com/docs/guides/database/postgres/row-level-security)
+数据库仅允许用户访问自己的数据；RPC 再核验预期账号。云端数据和导入备份使用相同的数据校验。实现与 SQL 已测试账号隔离、旧版本保护、删除标记和相同时间冲突一致性；正式手机网页也已发布。真实恢复邮件送达和用户修改密码后的双端重新登录仍需现场验证。[RLS 官方说明](https://supabase.com/docs/guides/database/postgres/row-level-security)
 
 同步的当前限制：
 
 - 冲突按客户端 `updatedAt` / `deletedAt` 时间选择较新版本，相同时间优先删除，再使用确定性字段排序；它不是逐字段协作合并。设备时钟严重不准可能影响胜出版本。
 - 删除保留 tombstone，防止离线设备重新上传后恢复旧任务。不要直接清除云表里的删除标记。
-- 目前只同步任务；自定义清单的名称和颜色不自动同步。其他设备对未知清单 ID 使用「同步清单」占位，可通过 JSON 备份携带完整清单元数据。
+- 当前同步日程、清单和课表；提醒权限、浏览器推送订阅和设备本机设置仍按设备分别管理。
 - 登录会话保存在当前设备。当前提供恢复邮件和已登录修改密码；不提供应用内数据库加密、端到端加密、账号删除页面或团队共享。
 
 ## 设计参考与开源依赖
