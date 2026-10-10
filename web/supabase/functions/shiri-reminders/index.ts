@@ -12,7 +12,8 @@ const env = (name: string) => {
   return value;
 };
 
-webpush.setVapidDetails('mailto:reminders@yushi.invalid', env('VAPID_PUBLIC_KEY'), env('VAPID_PRIVATE_KEY'));
+// Apple 的推送服务会拒绝无效域名的联系方式（BadJwtToken），这里用网页版的正式地址。
+webpush.setVapidDetails('https://yuquanzhao9.github.io/yushi-app/', env('VAPID_PUBLIC_KEY'), env('VAPID_PRIVATE_KEY'));
 const admin = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
 
 interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number }
@@ -40,6 +41,8 @@ Deno.serve(async request => {
   }
 
   let sent = 0;
+  // 失败原因写进响应（pg_net 会保存在 net._http_response），方便排查推送没到的问题。
+  const failures: { occurrence: string; status?: number; reason: string }[] = [];
   for (const sub of subscriptions as Subscription[]) {
     let due;
     try { due = dueReminders(tasksByUser.get(sub.user_id) ?? [], sub.time_zone, MULTI_LEADS, now); }
@@ -47,7 +50,7 @@ Deno.serve(async request => {
     for (const item of due) {
       // 先占位再发送：并发或重跑时同一提醒只发一次。
       const { error: claimError } = await admin.from('shiri_push_sent').insert({ endpoint: sub.endpoint, occurrence: item.occurrence });
-      if (claimError) continue;
+      if (claimError) { failures.push({ occurrence: item.occurrence, reason: `claim: ${claimError.message}` }); continue; }
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
@@ -57,6 +60,9 @@ Deno.serve(async request => {
         sent++;
       } catch (pushError) {
         const status = (pushError as { statusCode?: number }).statusCode;
+        const body = String((pushError as { body?: unknown }).body ?? (pushError as Error).message ?? '').slice(0, 300);
+        failures.push({ occurrence: item.occurrence, status, reason: body });
+        console.error('push failed', status, body);
         // 设备已取消订阅（删除了主屏幕图标等），清掉这条订阅。
         if (status === 404 || status === 410) await admin.from('shiri_push_subscriptions').delete().eq('endpoint', sub.endpoint);
         else await admin.from('shiri_push_sent').delete().eq('endpoint', sub.endpoint).eq('occurrence', item.occurrence);
@@ -65,5 +71,5 @@ Deno.serve(async request => {
   }
 
   await admin.from('shiri_push_sent').delete().lt('sent_at', new Date(now - 3 * 86_400_000).toISOString());
-  return Response.json({ devices: subscriptions?.length ?? 0, sent });
+  return Response.json({ devices: subscriptions?.length ?? 0, sent, failures });
 });
