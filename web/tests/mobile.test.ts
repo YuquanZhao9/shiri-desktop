@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { addDays, isDone as coreIsDone, occursOn as coreOccursOn } from '../../src/core.ts';
 import type { Task } from '../../src/types.ts';
-import { dueReminders, isDone, occursOn, zonedDateKey, zonedTime } from '../supabase/functions/shiri-reminders/schedule.ts';
+import { dueReminders, isDone, MULTI_LEADS, occursOn, zonedDateKey, zonedTime } from '../supabase/functions/shiri-reminders/schedule.ts';
 import { applyRemoteLists, planListSync } from '../../src/live-sync.ts';
 
 const base: Task = { id: 't1', title: '开会', date: '2026-01-31', time: '09:30', duration: 60, listId: 'work', notes: '', priority: 'normal', repeat: 'none', completed: false, doneDates: [], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
@@ -69,4 +69,14 @@ test('快速添加识别开头的时间', async () => {
   assert.deepEqual(parseQuick('9：05 晨会'), { title: '晨会', time: '09:05' });
   assert.deepEqual(parseQuick('买3个苹果'), { title: '买3个苹果', time: '' });
   assert.deepEqual(parseQuick('25:00 错'), { title: '25:00 错', time: '' });
+});
+
+test('cloud push reminds 2 h, 1 h, 30 min and 10 min before, once each', () => {
+  const task = { id: 'multi', title: '多次提醒', date: '2026-09-14', time: '12:00', repeat: 'none', completed: false, doneDates: [] };
+  const at = zonedTime('2026-09-14', '12:00', 'Europe/Berlin');
+  const fired = [120, 60, 30, 10].map(lead => dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - lead * 60_000));
+  assert.deepEqual(fired.map(due => due.length), [1, 1, 1, 1]);
+  assert.equal(new Set(fired.map(due => due[0].occurrence)).size, 4);
+  assert.match(fired[0][0].body, /2 小时后开始/);
+  assert.equal(dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - 45 * 60_000).length, 0);
 });

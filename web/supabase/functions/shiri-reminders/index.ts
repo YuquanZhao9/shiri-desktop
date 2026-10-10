@@ -4,7 +4,7 @@
 // SUPABASE_SERVICE_ROLE_KEY 由 Supabase 自动提供）。
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import webpush from 'npm:web-push@3.6.7';
-import { dueReminders, type ReminderTask } from './schedule.ts';
+import { dueReminders, MULTI_LEADS, type ReminderTask } from './schedule.ts';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -42,7 +42,7 @@ Deno.serve(async request => {
   let sent = 0;
   for (const sub of subscriptions as Subscription[]) {
     let due;
-    try { due = dueReminders(tasksByUser.get(sub.user_id) ?? [], sub.time_zone, sub.lead_minutes, now); }
+    try { due = dueReminders(tasksByUser.get(sub.user_id) ?? [], sub.time_zone, MULTI_LEADS, now); }
     catch { continue; } // 无效时区：跳过这台设备，不影响其他人
     for (const item of due) {
       // 先占位再发送：并发或重跑时同一提醒只发一次。

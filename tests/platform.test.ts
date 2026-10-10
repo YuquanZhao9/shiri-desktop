@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { reminderQueue, scheduleNative } from '../src/platform';
+import { reminderQueue, scheduleNative, MULTI_REMINDER_LEADS } from '../src/platform';
 import { addDays, dateKey } from '../src/core';
 import type { Task } from '../src/types';
 
@@ -55,4 +55,13 @@ test('reminders can fire a chosen number of minutes before the start',()=>{
   assert.match(queue[0].body,/^10 分钟后开始/);
   assert.equal(reminderQueue([task({time:'08:05'})],1,now,10).length,0,'a lead time already in the past is skipped');
   assert.throws(()=>reminderQueue([],30,now,-5));
+});
+
+test('default multi-lead schedule reminds 2 h, 1 h, 30 min and 10 min before each event',()=>{
+  const queue=reminderQueue([task({time:'12:00'})],1,now,MULTI_REMINDER_LEADS);
+  assert.deepEqual(queue.map(item=>item.at),['10:00','11:00','11:30','11:50'].map(time=>new Date(`${today}T${time}:00`).getTime()));
+  assert.equal(new Set(queue.map(item=>item.id)).size,4,'each lead time is a separate reminder');
+  assert.match(queue[0].body,/^2 小时后开始/);
+  assert.match(queue[2].body,/^30 分钟后开始/);
+  assert.deepEqual(reminderQueue([task({time:'09:00'})],1,now,MULTI_REMINDER_LEADS).map(item=>item.body.split(' · ')[0]),['30 分钟后开始','10 分钟后开始'],'leads already in the past are skipped');
 });

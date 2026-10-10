@@ -42,16 +42,26 @@ export async function writeSaved(key:string,value:string) {
   try { await next; }
   finally { if(pendingWrites.get(key)===next)pendingWrites.delete(key); }
 }
-export function reminderQueue(tasks:Task[],days=30,now=Date.now(),leadMinutes=0) {
+// 默认每个日程提前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。
+export const MULTI_REMINDER_LEADS=[120,60,30,10];
+export function leadLabel(minutes:number) {
+  return minutes>=60&&minutes%60===0?`${minutes/60} 小时`:`${minutes} 分钟`;
+}
+export function reminderQueue(tasks:Task[],days=30,now=Date.now(),leadMinutes:number|number[]=0) {
   if(!Number.isInteger(days)||days<1||days>366||!Number.isFinite(now))throw new Error('提醒时间范围无效');
-  if(!Number.isInteger(leadMinutes)||leadMinutes<0||leadMinutes>1440)throw new Error('提前提醒时间无效');
+  const leads=[...new Set(Array.isArray(leadMinutes)?leadMinutes:[leadMinutes])];
+  if(!leads.length||leads.some(lead=>!Number.isInteger(lead)||lead<0||lead>1440))throw new Error('提前提醒时间无效');
   const start=dateKey(new Date(now)), result:{id:string;title:string;body:string;at:number}[]=[];
   for(let i=0;i<days;i++) {
     const date=addDays(start,i);
     for(const task of tasksForDate(tasks,date)) {
       if(!task.time || isDone(task,date)) continue;
-      const at=new Date(`${date}T${task.time}:00`).getTime()-leadMinutes*60_000;
-      if(at>now) result.push({id:`${task.id}:${date}:${task.time}`,title:task.title.slice(0,160),body:leadMinutes?`${leadMinutes} 分钟后开始 · ${date} ${task.time}`:`${date} ${task.time} · 昱时`,at});
+      const begin=new Date(`${date}T${task.time}:00`).getTime();
+      for(const lead of leads) {
+        const at=begin-lead*60_000;
+        // 每个提前量是单独的一条提醒，标识里带上提前量以免互相覆盖。
+        if(at>now) result.push({id:`${task.id}:${date}:${task.time}${lead&&leads.length>1?`:-${lead}`:''}`,title:task.title.slice(0,160),body:lead?`${leadLabel(lead)}后开始 · ${date} ${task.time}`:`${date} ${task.time} · 昱时`,at});
+      }
     }
   }
   return result.sort((a,b)=>a.at-b.at).slice(0,2000);
@@ -64,7 +74,7 @@ export async function enableNotifications() {
 }
 let scheduleRevision=0;
 let pendingSchedule:Promise<void>=Promise.resolve();
-export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes=0):Promise<void> {
+export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes:number|number[]=0):Promise<void> {
   const revision=++scheduleRevision;
   const next=pendingSchedule.catch(()=>{}).then(async()=>{
     if(revision!==scheduleRevision)return;

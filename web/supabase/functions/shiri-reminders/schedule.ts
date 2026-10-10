@@ -77,7 +77,13 @@ function shiftKey(key: string, days: number): string {
  * 找出此刻该推送的提醒：提醒时刻（日程时间减提前量）落在 (now - lookback, now + ahead]。
  * 定时任务每分钟跑一次；lookback 覆盖偶尔延迟或漏跑的那一两分钟，重复由已发送表挡住。
  */
-export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinutes: number, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): Due[] {
+/** 默认每个日程提前 2 小时、1 小时、30 分钟、10 分钟各推送一次（与桌面版一致）。 */
+export const MULTI_LEADS = [120, 60, 30, 10];
+
+const leadText = (minutes: number) => minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
+
+export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinutes: number | number[], now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): Due[] {
+  const leads = [...new Set(Array.isArray(leadMinutes) ? leadMinutes : [leadMinutes])];
   const today = zonedDateKey(now, timeZone);
   const days = [shiftKey(today, -1), today, shiftKey(today, 1), shiftKey(today, 2)];
   const result: Due[] = [];
@@ -86,12 +92,14 @@ export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinute
     for (const day of days) {
       if (!occursOn(task, day) || isDone(task, day)) continue;
       const at = zonedTime(day, task.time, timeZone);
-      const fire = at - leadMinutes * 60_000;
-      if (fire <= now - lookbackMs || fire > now + aheadMs) continue;
       // 日程开始后就不再补发。
       if (at < now - 60_000) continue;
-      const when = leadMinutes ? `${leadMinutes} 分钟后开始` : '现在开始';
-      result.push({ occurrence: `${task.id}:${day}:${task.time}:${leadMinutes}`, title: task.title.slice(0, 160), body: `${task.time} · ${when}`, at });
+      // 只发最近到点的一条：漏跑几分钟后不会把 30 分钟和 10 分钟的提醒同时推出来。
+      const fired = leads.filter(lead => { const fire = at - lead * 60_000; return fire > now - lookbackMs && fire <= now + aheadMs; });
+      if (!fired.length) continue;
+      const lead = Math.min(...fired);
+      const when = lead ? `${leadText(lead)}后开始` : '现在开始';
+      result.push({ occurrence: `${task.id}:${day}:${task.time}:${lead}`, title: task.title.slice(0, 160), body: `${task.time} · ${when}`, at });
     }
   }
   return result.sort((a, b) => a.at - b.at);
