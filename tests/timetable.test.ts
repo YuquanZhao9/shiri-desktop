@@ -35,13 +35,13 @@ test('windows keep the most recently edited timetable', () => {
   assert.equal(mergeWindowData(defaultData(), defaultData()).timetable, undefined);
 });
 
-test('each semester weekday lists its classes by period, keeping empty periods', async () => {
+test('each semester weekday lists only the periods that have a class', async () => {
   const { classesForDate } = await import('../src/timetable');
   const monday = classesForDate(DEFAULT_TIMETABLE, '2026-10-12');
-  assert.deepEqual(monday?.map(row => row.start), ['08:00', '09:45', '11:30', '14:00', '15:45']);
+  assert.deepEqual(monday?.map(row => row.start), ['08:00', '15:45']);
   assert.deepEqual(monday?.[0].slots.map(slot => slot.title), ['AR 讲课', 'MC 讲课']);
-  assert.equal(monday?.[1].slots.length, 0, 'empty periods stay in the layout');
-  assert.deepEqual(monday?.[4].slots.map(slot => slot.title), ['AM 讲课']);
+  assert.deepEqual(monday?.[1].slots.map(slot => slot.title), ['AM 讲课']);
+  assert.deepEqual(classesForDate(DEFAULT_TIMETABLE, '2026-10-13')?.map(row => row.start), ['08:00', '11:30', '14:00']);
   assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-10-16'), null, 'Friday has no classes');
   assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-10-05'), null, 'before the semester');
   assert.equal(classesForDate(DEFAULT_TIMETABLE, '2027-02-15'), null, 'after the semester');
@@ -49,9 +49,26 @@ test('each semester weekday lists its classes by period, keeping empty periods',
   assert.ok(classesForDate(DEFAULT_TIMETABLE, '2027-02-11'), 'the last week is still filled');
 });
 
+test('a class can skip single dates and have its own first and last date', async () => {
+  const { classesForDate } = await import('../src/timetable');
+  const slots = DEFAULT_TIMETABLE.slots.map(slot => slot.id === 'wed-itcl' ? { ...slot, skip: ['2026-10-14'] } : slot.id === 'thu-sasp' ? { ...slot, from: '2026-10-22', until: '2027-01-28' } : slot);
+  const table = validateTimetable({ ...DEFAULT_TIMETABLE, slots });
+  assert.deepEqual(table.slots.find(slot => slot.id === 'wed-itcl')?.skip, ['2026-10-14']);
+  const titles = (date: string) => classesForDate(table, date)?.flatMap(row => row.slots.map(slot => slot.title));
+  assert.deepEqual(titles('2026-10-14'), ['AR 练习'], 'ITCL skipped that week only, AR stays');
+  assert.deepEqual(titles('2026-10-21'), ['ITCL 练习', 'AR 练习']);
+  assert.deepEqual(titles('2026-10-15'), ['ITCL 讲课'], 'before its first date');
+  assert.deepEqual(titles('2026-10-22'), ['SASP 讲课', 'ITCL 讲课']);
+  assert.deepEqual(titles('2027-02-04'), ['ITCL 讲课'], 'after its last date');
+  const onlyItcl = { ...DEFAULT_TIMETABLE, slots: [{ ...DEFAULT_TIMETABLE.slots[6], skip: ['2026-10-14'] }] };
+  assert.equal(classesForDate(onlyItcl, '2026-10-14'), null, 'a day whose only class is skipped shows nothing');
+  assert.throws(() => validateTimetable({ ...DEFAULT_TIMETABLE, slots: [{ ...DEFAULT_TIMETABLE.slots[0], skip: ['14.10.'] }] }), /跳过日期/);
+  assert.throws(() => validateTimetable({ ...DEFAULT_TIMETABLE, slots: [{ ...DEFAULT_TIMETABLE.slots[0], from: '2026-12-01', until: '2026-11-01' }] }), /末次日期/);
+});
+
 test('no classes during the Uni Stuttgart Christmas break, including older saves without breaks', async () => {
   const { classesForDate, breaksOf } = await import('../src/timetable');
-  assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-12-22')?.length, 5, 'Tuesday before the break still has classes');
+  assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-12-22')?.length, 3, 'Tuesday before the break still has classes');
   for (const day of ['2026-12-23', '2026-12-28', '2027-01-04', '2027-01-06']) assert.equal(classesForDate(DEFAULT_TIMETABLE, day), null, day);
   assert.ok(classesForDate(DEFAULT_TIMETABLE, '2027-01-07'), 'classes resume on 7 January');
   const { breaks: _omitted, ...older } = DEFAULT_TIMETABLE;

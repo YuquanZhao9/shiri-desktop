@@ -64,7 +64,7 @@ export function validateTimetable(input: unknown): Timetable {
   if (!Array.isArray(root.courses) || root.courses.length > 60) throw new Error('课程图例过多');
   const ids = new Set<string>();
   const slots: TimetableSlot[] = root.slots.map((value: unknown) => {
-    const item = plain(value, ['id', 'day', 'start', 'end', 'title', 'note', 'color', 'dashed', 'alerts'], '课表课程');
+    const item = plain(value, ['id', 'day', 'start', 'end', 'title', 'note', 'color', 'dashed', 'alerts', 'skip', 'from', 'until'], '课表课程');
     const id = pattern(item.id, /^[A-Za-z0-9_-]{1,64}$/, '课程 ID');
     if (ids.has(id)) throw new Error('课程 ID 重复');
     ids.add(id);
@@ -81,7 +81,15 @@ export function validateTimetable(input: unknown): Timetable {
         return { date: pattern(entry.date, DATE, '提醒日期'), note: text(entry.note, 200, '提醒内容') };
       });
     }
-    return { id, day: item.day, start: slotStart, end: slotEnd, title: text(item.title, 80, '课程名称'), note: text(item.note, 200, '课程备注'), color: pattern(item.color, COLOR, '课程颜色'), dashed: item.dashed, ...(alerts ? { alerts } : {}) };
+    let skip: string[] | undefined;
+    if (item.skip !== undefined) {
+      if (!Array.isArray(item.skip) || item.skip.length > 200) throw new Error('跳过日期过多');
+      skip = item.skip.map((date: unknown) => pattern(date, DATE, '跳过日期'));
+    }
+    const from = item.from === undefined ? undefined : pattern(item.from, DATE, '课程首次日期');
+    const until = item.until === undefined ? undefined : pattern(item.until, DATE, '课程末次日期');
+    if (from && until && until < from) throw new Error('课程末次日期早于首次日期');
+    return { id, day: item.day, start: slotStart, end: slotEnd, title: text(item.title, 80, '课程名称'), note: text(item.note, 200, '课程备注'), color: pattern(item.color, COLOR, '课程颜色'), dashed: item.dashed, ...(alerts ? { alerts } : {}), ...(skip ? { skip } : {}), ...(from ? { from } : {}), ...(until ? { until } : {}) };
   });
   const courses: TimetableCourse[] = root.courses.map((value: unknown) => {
     const item = plain(value, ['code', 'name', 'color'], '课程图例');
@@ -113,31 +121,33 @@ export function slotsForWeekday(timetable: Timetable, day: number): TimetableSlo
   return timetable.slots.filter(slot => slot.day === day).sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
 }
 
-/** Standard 90-minute periods of the timetable (08:00, 09:45, 11:30, 14:00, 15:45). */
-export const DEFAULT_PERIODS = ['08:00', '09:45', '11:30', '14:00', '15:45'];
+/** Whether a weekly class takes place on a date of its weekday (its own first/last date and skipped dates). */
+export function slotRunsOn(slot: TimetableSlot, date: string): boolean {
+  if (slot.from && date < slot.from) return false;
+  if (slot.until && date > slot.until) return false;
+  return !slot.skip?.includes(date);
+}
 
 /** A class on one date, with that date's warning if any. */
 export type DayClass = TimetableSlot & { alert?: string };
 export interface PeriodRow { start: string; slots: DayClass[]; }
 
 /**
- * Classes for one calendar date laid out by period, empty periods included.
- * Returns null outside the semester, on holidays, or on weekdays without any class.
+ * Classes for one calendar date grouped by start time; only periods that have a class that day.
+ * Returns null outside the semester, on holidays, during breaks, or when no class takes place.
  */
 export function classesForDate(timetable: Timetable, date: string, holiday = false): PeriodRow[] | null {
   if (holiday || date < timetable.start || date > timetable.end) return null;
   if (breaksOf(timetable).some(item => date >= item.start && date <= item.end)) return null;
   const [year, month, day] = date.split('-').map(Number);
   const weekday = (new Date(year, month - 1, day).getDay() + 6) % 7 + 1;
-  if (!timetable.slots.some(slot => slot.day === weekday)) return null;
-  // Periods come from the standard grid plus any other start time the user entered.
-  const starts = [...new Set([...DEFAULT_PERIODS, ...timetable.slots.map(slot => slot.start)])].sort();
-  const today = slotsForWeekday(timetable, weekday);
+  const today = slotsForWeekday(timetable, weekday).filter(slot => slotRunsOn(slot, date));
+  if (!today.length) return null;
   const withAlert = (slot: TimetableSlot): DayClass => {
     const alert = slot.alerts?.find(item => item.date === date)?.note;
     return alert ? { ...slot, alert } : slot;
   };
-  return starts.map(start => ({ start, slots: today.filter(slot => slot.start === start).map(withAlert) }));
+  return [...new Set(today.map(slot => slot.start))].sort().map(start => ({ start, slots: today.filter(slot => slot.start === start).map(withAlert) }));
 }
 
 /** Saved timetables from before breaks existed get the preset breaks when they are the same semester. */
