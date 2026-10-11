@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateBackup, defaultData } from '../../拾日/src/core.ts';
+import { validateBackup, defaultData } from '../../src/core.ts';
 import { applyFields, busy, free, newTask, nextStamp, occurrences, setDone } from '../supabase/functions/ai-sync/ops.ts';
 
 const lists = defaultData().lists;
@@ -9,7 +9,7 @@ const now = Date.parse('2026-09-28T18:00:00.000Z');
 
 test('云函数用的数据代码与电脑版一致（改了桌面版要重新运行 sync-shared）', () => {
   for (const file of ['types.ts', 'core.ts', 'timetable.ts', 'holidays.ts']) {
-    const desktop = readFileSync(new URL(`../../拾日/src/${file}`, import.meta.url), 'utf8').replace(/from '\.\/([a-z-]+)'/g, "from './$1.ts'");
+    const desktop = readFileSync(new URL(`../../src/${file}`, import.meta.url), 'utf8').replace(/from '\.\/([a-z-]+)'/g, "from './$1.ts'");
     const copy = readFileSync(new URL(`../supabase/functions/_shared/${file}`, import.meta.url), 'utf8');
     assert.equal(copy.slice(copy.indexOf('\n') + 1), desktop, file);
   }

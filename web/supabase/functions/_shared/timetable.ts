@@ -1,5 +1,5 @@
 // 自动从 拾日/src/timetable.ts 复制，请勿手改；运行 node scripts/sync-shared.mjs 更新。
-import type { Timetable, TimetableAlert, TimetableBreak, TimetableCourse, TimetableSlot } from './types.ts';
+import type { Task, Timetable, TimetableAlert, TimetableBreak, TimetableCourse, TimetableSlot } from './types.ts';
 
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -64,7 +64,7 @@ export function validateTimetable(input: unknown): Timetable {
   if (!Array.isArray(root.courses) || root.courses.length > 60) throw new Error('课程图例过多');
   const ids = new Set<string>();
   const slots: TimetableSlot[] = root.slots.map((value: unknown) => {
-    const item = plain(value, ['id', 'day', 'start', 'end', 'title', 'note', 'color', 'dashed', 'alerts'], '课表课程');
+    const item = plain(value, ['id', 'day', 'start', 'end', 'title', 'note', 'color', 'dashed', 'alerts', 'skip', 'from', 'until'], '课表课程');
     const id = pattern(item.id, /^[A-Za-z0-9_-]{1,64}$/, '课程 ID');
     if (ids.has(id)) throw new Error('课程 ID 重复');
     ids.add(id);
@@ -81,7 +81,15 @@ export function validateTimetable(input: unknown): Timetable {
         return { date: pattern(entry.date, DATE, '提醒日期'), note: text(entry.note, 200, '提醒内容') };
       });
     }
-    return { id, day: item.day, start: slotStart, end: slotEnd, title: text(item.title, 80, '课程名称'), note: text(item.note, 200, '课程备注'), color: pattern(item.color, COLOR, '课程颜色'), dashed: item.dashed, ...(alerts ? { alerts } : {}) };
+    let skip: string[] | undefined;
+    if (item.skip !== undefined) {
+      if (!Array.isArray(item.skip) || item.skip.length > 200) throw new Error('跳过日期过多');
+      skip = item.skip.map((date: unknown) => pattern(date, DATE, '跳过日期'));
+    }
+    const from = item.from === undefined ? undefined : pattern(item.from, DATE, '课程首次日期');
+    const until = item.until === undefined ? undefined : pattern(item.until, DATE, '课程末次日期');
+    if (from && until && until < from) throw new Error('课程末次日期早于首次日期');
+    return { id, day: item.day, start: slotStart, end: slotEnd, title: text(item.title, 80, '课程名称'), note: text(item.note, 200, '课程备注'), color: pattern(item.color, COLOR, '课程颜色'), dashed: item.dashed, ...(alerts ? { alerts } : {}), ...(skip ? { skip } : {}), ...(from ? { from } : {}), ...(until ? { until } : {}) };
   });
   const courses: TimetableCourse[] = root.courses.map((value: unknown) => {
     const item = plain(value, ['code', 'name', 'color'], '课程图例');
@@ -113,31 +121,33 @@ export function slotsForWeekday(timetable: Timetable, day: number): TimetableSlo
   return timetable.slots.filter(slot => slot.day === day).sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
 }
 
-/** Standard 90-minute periods of the timetable (08:00, 09:45, 11:30, 14:00, 15:45). */
-export const DEFAULT_PERIODS = ['08:00', '09:45', '11:30', '14:00', '15:45'];
+/** Whether a weekly class takes place on a date of its weekday (its own first/last date and skipped dates). */
+export function slotRunsOn(slot: TimetableSlot, date: string): boolean {
+  if (slot.from && date < slot.from) return false;
+  if (slot.until && date > slot.until) return false;
+  return !slot.skip?.includes(date);
+}
 
 /** A class on one date, with that date's warning if any. */
 export type DayClass = TimetableSlot & { alert?: string };
 export interface PeriodRow { start: string; slots: DayClass[]; }
 
 /**
- * Classes for one calendar date laid out by period, empty periods included.
- * Returns null outside the semester, on holidays, or on weekdays without any class.
+ * Classes for one calendar date grouped by start time; only periods that have a class that day.
+ * Returns null outside the semester, on holidays, during breaks, or when no class takes place.
  */
 export function classesForDate(timetable: Timetable, date: string, holiday = false): PeriodRow[] | null {
   if (holiday || date < timetable.start || date > timetable.end) return null;
   if (breaksOf(timetable).some(item => date >= item.start && date <= item.end)) return null;
   const [year, month, day] = date.split('-').map(Number);
   const weekday = (new Date(year, month - 1, day).getDay() + 6) % 7 + 1;
-  if (!timetable.slots.some(slot => slot.day === weekday)) return null;
-  // Periods come from the standard grid plus any other start time the user entered.
-  const starts = [...new Set([...DEFAULT_PERIODS, ...timetable.slots.map(slot => slot.start)])].sort();
-  const today = slotsForWeekday(timetable, weekday);
+  const today = slotsForWeekday(timetable, weekday).filter(slot => slotRunsOn(slot, date));
+  if (!today.length) return null;
   const withAlert = (slot: TimetableSlot): DayClass => {
     const alert = slot.alerts?.find(item => item.date === date)?.note;
     return alert ? { ...slot, alert } : slot;
   };
-  return starts.map(start => ({ start, slots: today.filter(slot => slot.start === start).map(withAlert) }));
+  return [...new Set(today.map(slot => slot.start))].sort().map(start => ({ start, slots: today.filter(slot => slot.start === start).map(withAlert) }));
 }
 
 /** Saved timetables from before breaks existed get the preset breaks when they are the same semester. */
@@ -149,4 +159,67 @@ export function breaksOf(timetable: Timetable): TimetableBreak[] {
 /** The timetable to show: the user's saved one, or the preset when nothing newer than the preset was saved. */
 export function effectiveTimetable(saved: Timetable | undefined): Timetable {
   return !saved || saved.updatedAt <= DEFAULT_TIMETABLE.updatedAt ? DEFAULT_TIMETABLE : saved;
+}
+
+/** All classes share one color so they read as one kind of entry among the day's events. */
+export const CLASS_COLOR = '#2A9D8F';
+
+export type AgendaItem = { kind: 'task'; time: string; task: Task } | { kind: 'class'; time: string; slot: DayClass };
+
+/** A day's events and classes in one list by start time; untimed events go last. */
+export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null): AgendaItem[] {
+  const items: AgendaItem[] = [
+    ...(classes ?? []).flatMap(row => row.slots.map(slot => ({ kind: 'class' as const, time: slot.start, slot }))),
+    ...tasks.map(task => ({ kind: 'task' as const, time: task.time, task })),
+  ];
+  return items.map((item, index) => ({ item, index })).sort((a, b) =>
+    Number(!a.item.time) - Number(!b.item.time) || a.item.time.localeCompare(b.item.time) || a.index - b.index,
+  ).map(entry => entry.item);
+}
+
+const clock = (time: string): number => {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+
+/**
+ * Vertical position (0–1) of a time of day in a date cell. 06–20 get one slot per hour;
+ * the quiet hours 00–06 and 20–24 are each squeezed into a single slot, 16 slots in all.
+ */
+export function dayFraction(minutes: number): number {
+  const m = Math.min(Math.max(minutes, 0), 1440);
+  const slot = m < 360 ? m / 360 : m < 1200 ? 1 + (m - 360) / 60 : 15 + (m - 1200) / 240;
+  return slot / 16;
+}
+
+export interface PlacedItem { item: AgendaItem; top: number; height: number; lane: number; lanes: number }
+
+/** Where each timed entry sits in a date cell (overlaps share the width side by side); untimed entries are listed apart. */
+export function cellLayout(items: AgendaItem[], minHeight = 0.06): { timed: PlacedItem[]; untimed: AgendaItem[] } {
+  const untimed = items.filter(item => !item.time);
+  const spans = items.filter(item => item.time).map(item => {
+    const start = clock(item.time);
+    let end = item.kind === 'task' ? start + item.task.duration : clock(item.slot.end);
+    if (end <= start) end = start + 60;
+    const top = dayFraction(start);
+    const height = Math.max(dayFraction(end) - top, minHeight);
+    return { item, top: Math.min(top, 1 - height), height };
+  }).sort((a, b) => a.top - b.top || b.height - a.height);
+  const timed: PlacedItem[] = [];
+  let cluster: PlacedItem[] = [];
+  let ends: number[] = [];
+  let clusterEnd = -1;
+  const close = () => { for (const placed of cluster) placed.lanes = ends.length; cluster = []; ends = []; };
+  for (const span of spans) {
+    if (span.top >= clusterEnd - 1e-9) { close(); clusterEnd = -1; }
+    let lane = ends.findIndex(end => end <= span.top + 1e-9);
+    if (lane === -1) lane = ends.length;
+    ends[lane] = span.top + span.height;
+    clusterEnd = Math.max(clusterEnd, span.top + span.height);
+    const placed = { ...span, lane, lanes: 1 };
+    cluster.push(placed);
+    timed.push(placed);
+  }
+  close();
+  return { timed, untimed };
 }

@@ -69,21 +69,35 @@ function normalizeCloudSettings(rawUrl: string, rawKey: string): CloudSettings {
   return { url: url.href.replace(/\/$/, ''), key };
 }
 
-export function createCloudClient(url: string, key: string): SupabaseClient {
+export interface CloudClientOptions {
+  detectSessionInUrl?: boolean;
+}
+
+export const PASSWORD_RESET_REDIRECT = 'https://yuquanzhao9.github.io/yushi-app/?password-reset=1';
+
+export function createCloudClient(url: string, key: string, options: CloudClientOptions = {}): SupabaseClient {
   const settings = normalizeCloudSettings(url, key);
   return createClient(settings.url, settings.key, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: false,
+      detectSessionInUrl: options.detectSessionInUrl ?? false,
     },
   });
 }
 
 export async function signUp(client: SupabaseClient, email: string, password: string) {
   const { data, error } = await client.auth.signUp({ email: email.trim(), password });
-  if (error) throw new Error(cloudErrorMessage(error));
-  return { ...data, needsEmailConfirmation: !data.session };
+  if (error) {
+    if (/user already registered/i.test(error.message)) {
+      return { user: null, session: null, needsEmailConfirmation: false, alreadyRegistered: true };
+    }
+    throw new Error(cloudErrorMessage(error));
+  }
+  // With email confirmation enabled, GoTrue may hide a duplicate signup behind
+  // an obfuscated user whose identities list is empty.
+  const alreadyRegistered = !!data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0;
+  return { ...data, needsEmailConfirmation: !data.session, alreadyRegistered };
 }
 
 export async function signIn(client: SupabaseClient, email: string, password: string) {
@@ -94,6 +108,23 @@ export async function signIn(client: SupabaseClient, email: string, password: st
 
 export async function signOut(client: SupabaseClient): Promise<void> {
   const { error } = await client.auth.signOut({ scope: 'local' });
+  if (error) throw new Error(cloudErrorMessage(error));
+}
+
+export async function requestPasswordReset(
+  client: SupabaseClient,
+  email: string,
+  redirectTo = PASSWORD_RESET_REDIRECT,
+): Promise<void> {
+  const normalized = email.trim();
+  if (!normalized) throw new Error('请先填写注册邮箱。');
+  const { error } = await client.auth.resetPasswordForEmail(normalized, { redirectTo });
+  if (error) throw new Error(cloudErrorMessage(error));
+}
+
+export async function updatePassword(client: SupabaseClient, password: string): Promise<void> {
+  if (password.length < 8) throw new Error('新密码至少需要 8 位字符。');
+  const { error } = await client.auth.updateUser({ password });
   if (error) throw new Error(cloudErrorMessage(error));
 }
 

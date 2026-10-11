@@ -179,20 +179,41 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .timetable-term { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin:8px 0; }
 .timetable-rows { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
 .timetable-row { display:grid; grid-template-columns:62px 84px 84px minmax(80px,1fr) minmax(80px,1.3fr) 34px 56px 30px; gap:6px; align-items:center; }
+.timetable-row-dates { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:-2px 0 4px 68px; font-size:12px; opacity:.85; }
+.timetable-row-dates label { display:flex; align-items:center; gap:4px; }
+.timetable-row-dates input[type=date] { width:132px; }
+.skip-dates { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+.skip-chip { display:inline-flex; align-items:center; gap:2px; padding:1px 6px; border-radius:10px; font-size:11px; }
 .timetable-row.legend-row { grid-template-columns:80px minmax(120px,1fr) 34px 30px; }
 .timetable-row input[type=color] { width:32px; height:28px; padding:1px; }
 .timetable-row .dashed-toggle { display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; }
 
-/* Classes inside each day cell, one row per period; empty periods stay as faint outlines. */
-.cell-classes { flex:0 1 auto; min-height:0; display:grid; grid-auto-rows:minmax(9px, 19px); gap:2px; margin-top:4px; overflow:hidden; }
-.class-period { display:flex; align-items:stretch; gap:3px; min-height:0; min-width:0; }
-.class-period small { flex:none; width:30px; align-self:center; font-size:9px; line-height:1; color:#d6e3f0a0; }
-.class-period.empty { border:1px dashed #ffffff26; border-radius:3px; }
-.class-period.empty small { padding-left:3px; color:#d6e3f066; }
-.class-chip { flex:1 1 0; min-width:0; display:flex; align-items:center; padding:0 5px; border-radius:3px; border-left:3px solid var(--slot-color); background:color-mix(in srgb, var(--slot-color) 30%, transparent); color:#eef5fc; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.class-chip.dashed { border:1px dashed var(--slot-color); border-left:3px dashed var(--slot-color); background:color-mix(in srgb, var(--slot-color) 10%, transparent); }
-.desktop-calendar[data-span='month'] .class-period small { display:none; }
 .timetable-breaks { display:flex; flex-direction:column; gap:6px; margin:10px 0; }
 .timetable-row.break-row { grid-template-columns:minmax(120px,1fr) 140px 140px 30px; }
-.class-chip.alert { box-shadow:inset 0 0 0 1px #ffc86b; }
-.class-chip b { flex:none; margin-right:3px; color:#ffcf73; font-weight:700; }
+
+/* Classes sit among the day's events, solid in one shared color with a 课 tag; dashed = not on site or flexible. */
+.desktop-calendar .calendar-event.class-event { cursor:default; background:var(--event-color); color:#fff; font-weight:600; }
+.desktop-calendar .calendar-event.class-event small { color:#ffffffd9; }
+.desktop-calendar .calendar-event.class-event.dashed { background:color-mix(in srgb, var(--event-color) 45%, transparent); outline:1px dashed #ffffffb0; outline-offset:-1px; }
+.calendar-event.class-event.alert { box-shadow:inset 0 0 0 1px #ffc86b; }
+.calendar-event.class-event b { flex:none; color:#ffcf73; font-weight:700; }
+.calendar-event.class-event b.class-tag { color:var(--event-color); background:#fff; border-radius:3px; padding:0 3px; font-size:9px; line-height:13px; }
+
+/* Starred events: a gold star before the title; the editor toggles it. */
+.inline-editor-heading button.star-toggle.on { color:#ffc94d; }
+.calendar-event .event-star { flex:none; color:#ffc94d; }
+
+/* Each date cell is a small day timeline: 06–20 one slot per hour, 00–06 and 20–24 one slot each
+   (shaded). Entries without a time sit in a strip at the bottom. */
+.day-cell .cell-timeline { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:3px; }
+.day-cell .cell-hours { position:relative; flex:1 1 auto; min-height:24px; border-radius:4px;
+  background:
+    linear-gradient(to bottom, #8090a014 0 6.25%, transparent 6.25% 93.75%, #8090a014 93.75%),
+    linear-gradient(to bottom, transparent calc(43.75% - .5px), #8090a038 calc(43.75% - .5px) calc(43.75% + .5px), transparent calc(43.75% + .5px)); }
+.day-cell .cell-hours > .calendar-event { position:absolute; min-height:0; margin:0; padding:0 3px; gap:3px; align-items:flex-start; overflow:hidden; border:1px solid transparent; background-clip:padding-box; line-height:11px; }
+.day-cell .cell-hours > .calendar-event i { height:auto; align-self:stretch; }
+.day-cell .cell-hours > .calendar-event .event-notes { display:none; }
+.day-cell .cell-tasks.cell-untimed, .day-cell .cell-timeline > .cell-tasks { flex:0 1 auto; max-height:34%; }
+.day-cell .cell-hours > .calendar-event.bar { padding:0; }
+.day-cell .cell-hours > .calendar-event.bar > * { display:none; }
+.day-cell .cell-hours > .calendar-event.bar { min-height:3px; background:color-mix(in srgb, var(--event-color) 80%, transparent); }

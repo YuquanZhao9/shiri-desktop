@@ -48,6 +48,11 @@ export interface TimetableSlot {
   dashed: boolean;
   /** Warnings for specific dates, e.g. a clash with a block seminar. */
   alerts?: TimetableAlert[];
+  /** Dates (YYYY-MM-DD) this class does not take place, e.g. one cancelled week. */
+  skip?: string[];
+  /** Optional first and last date of this class, inside the semester. */
+  from?: string;
+  until?: string;
 }
 
 export interface TimetableAlert {

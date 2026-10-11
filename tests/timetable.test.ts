@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultData, validateBackup } from '../src/core';
-import { DEFAULT_TIMETABLE, newerTimetable, slotsForWeekday, validateTimetable } from '../src/timetable';
+import { CLASS_COLOR, DEFAULT_TIMETABLE, cellLayout, dayAgenda, dayFraction, newerTimetable, slotsForWeekday, validateTimetable } from '../src/timetable';
 import { mergeWindowData } from '../src/window-data';
 import type { Task } from '../src/types';
 
@@ -35,13 +35,13 @@ test('windows keep the most recently edited timetable', () => {
   assert.equal(mergeWindowData(defaultData(), defaultData()).timetable, undefined);
 });
 
-test('each semester weekday lists its classes by period, keeping empty periods', async () => {
+test('each semester weekday lists only the periods that have a class', async () => {
   const { classesForDate } = await import('../src/timetable');
   const monday = classesForDate(DEFAULT_TIMETABLE, '2026-10-12');
-  assert.deepEqual(monday?.map(row => row.start), ['08:00', '09:45', '11:30', '14:00', '15:45']);
+  assert.deepEqual(monday?.map(row => row.start), ['08:00', '15:45']);
   assert.deepEqual(monday?.[0].slots.map(slot => slot.title), ['AR 讲课', 'MC 讲课']);
-  assert.equal(monday?.[1].slots.length, 0, 'empty periods stay in the layout');
-  assert.deepEqual(monday?.[4].slots.map(slot => slot.title), ['AM 讲课']);
+  assert.deepEqual(monday?.[1].slots.map(slot => slot.title), ['AM 讲课']);
+  assert.deepEqual(classesForDate(DEFAULT_TIMETABLE, '2026-10-13')?.map(row => row.start), ['08:00', '11:30', '14:00']);
   assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-10-16'), null, 'Friday has no classes');
   assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-10-05'), null, 'before the semester');
   assert.equal(classesForDate(DEFAULT_TIMETABLE, '2027-02-15'), null, 'after the semester');
@@ -49,9 +49,26 @@ test('each semester weekday lists its classes by period, keeping empty periods',
   assert.ok(classesForDate(DEFAULT_TIMETABLE, '2027-02-11'), 'the last week is still filled');
 });
 
+test('a class can skip single dates and have its own first and last date', async () => {
+  const { classesForDate } = await import('../src/timetable');
+  const slots = DEFAULT_TIMETABLE.slots.map(slot => slot.id === 'wed-itcl' ? { ...slot, skip: ['2026-10-14'] } : slot.id === 'thu-sasp' ? { ...slot, from: '2026-10-22', until: '2027-01-28' } : slot);
+  const table = validateTimetable({ ...DEFAULT_TIMETABLE, slots });
+  assert.deepEqual(table.slots.find(slot => slot.id === 'wed-itcl')?.skip, ['2026-10-14']);
+  const titles = (date: string) => classesForDate(table, date)?.flatMap(row => row.slots.map(slot => slot.title));
+  assert.deepEqual(titles('2026-10-14'), ['AR 练习'], 'ITCL skipped that week only, AR stays');
+  assert.deepEqual(titles('2026-10-21'), ['ITCL 练习', 'AR 练习']);
+  assert.deepEqual(titles('2026-10-15'), ['ITCL 讲课'], 'before its first date');
+  assert.deepEqual(titles('2026-10-22'), ['SASP 讲课', 'ITCL 讲课']);
+  assert.deepEqual(titles('2027-02-04'), ['ITCL 讲课'], 'after its last date');
+  const onlyItcl = { ...DEFAULT_TIMETABLE, slots: [{ ...DEFAULT_TIMETABLE.slots[6], skip: ['2026-10-14'] }] };
+  assert.equal(classesForDate(onlyItcl, '2026-10-14'), null, 'a day whose only class is skipped shows nothing');
+  assert.throws(() => validateTimetable({ ...DEFAULT_TIMETABLE, slots: [{ ...DEFAULT_TIMETABLE.slots[0], skip: ['14.10.'] }] }), /跳过日期/);
+  assert.throws(() => validateTimetable({ ...DEFAULT_TIMETABLE, slots: [{ ...DEFAULT_TIMETABLE.slots[0], from: '2026-12-01', until: '2026-11-01' }] }), /末次日期/);
+});
+
 test('no classes during the Uni Stuttgart Christmas break, including older saves without breaks', async () => {
   const { classesForDate, breaksOf } = await import('../src/timetable');
-  assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-12-22')?.length, 5, 'Tuesday before the break still has classes');
+  assert.equal(classesForDate(DEFAULT_TIMETABLE, '2026-12-22')?.length, 3, 'Tuesday before the break still has classes');
   for (const day of ['2026-12-23', '2026-12-28', '2027-01-04', '2027-01-06']) assert.equal(classesForDate(DEFAULT_TIMETABLE, day), null, day);
   assert.ok(classesForDate(DEFAULT_TIMETABLE, '2027-01-07'), 'classes resume on 7 January');
   const { breaks: _omitted, ...older } = DEFAULT_TIMETABLE;
@@ -74,4 +91,28 @@ test('clash dates carry a warning on that class only, and old preset saves follo
   const edited = { ...DEFAULT_TIMETABLE, name: '我的课表', updatedAt: '2026-10-01T00:00:00.000Z' };
   assert.equal(effectiveTimetable(edited), edited);
   assert.equal(effectiveTimetable(undefined), DEFAULT_TIMETABLE);
+});
+
+test('classes join the events in one time-ordered list, untimed events last', () => {
+  const event = (id: string, time: string): Task => ({ id, title: id, date: '2026-10-12', time, duration: 60, listId: 'work', notes: '', priority: 'normal', repeat: 'none', completed: false, doneDates: [], createdAt: '', updatedAt: '' });
+  const slot = { id: 's1', day: 1, start: '10:00', end: '11:30', title: 'Math', note: '', color: '#E5534B', dashed: false };
+  const items = dayAgenda([event('morning', '08:00'), event('noon', '12:00'), event('anytime', '')], [{ start: '10:00', slots: [slot] }]);
+  assert.deepEqual(items.map(item => item.kind === 'task' ? item.task.id : item.slot.id), ['morning', 's1', 'noon', 'anytime']);
+  assert.match(CLASS_COLOR, /^#[0-9A-F]{6}$/);
+});
+
+test('date cells give 06–20 one slot per hour and squeeze 00–06 and 20–24 into one slot each', () => {
+  assert.equal(dayFraction(0), 0);
+  assert.equal(dayFraction(6 * 60), 1 / 16);
+  assert.equal(dayFraction(12 * 60), 7 / 16);
+  assert.equal(dayFraction(20 * 60), 15 / 16);
+  assert.equal(dayFraction(24 * 60), 1);
+  const event = (id: string, time: string, duration = 60): Task => ({ id, title: id, date: '2026-10-12', time, duration, listId: 'work', notes: '', priority: 'normal', repeat: 'none', completed: false, doneDates: [], createdAt: '', updatedAt: '' });
+  const { timed, untimed } = cellLayout(dayAgenda([event('a', '09:00', 120), event('b', '10:00'), event('c', '14:00'), event('d', '')], null));
+  assert.deepEqual(untimed.map(item => item.kind === 'task' && item.task.id), ['d']);
+  const byId = Object.fromEntries(timed.map(p => [p.item.kind === 'task' ? p.item.task.id : '', p]));
+  assert.equal(byId.a.top, 4 / 16);
+  assert.equal(byId.a.height, 2 / 16);
+  assert.deepEqual([byId.a.lane, byId.a.lanes, byId.b.lane, byId.b.lanes], [0, 2, 1, 2]);
+  assert.deepEqual([byId.c.lane, byId.c.lanes], [0, 1]);
 });

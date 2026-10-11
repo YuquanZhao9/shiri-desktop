@@ -126,3 +126,9 @@ test('lunar dates format through the Chinese calendar', () => {
   assert.match(formatLunar('2024-02-10'), /正月|一月/);
   assert.equal(formatLunar('2024-02-11'), '初二');
 });
+
+test('a day lists events by start time with untimed ones last, done or not', () => {
+  const day = '2024-01-31';
+  const tasks = [task({ id: 'a', time: '' }), task({ id: 'b', time: '14:00', completed: true }), task({ id: 'c', time: '08:30' })];
+  assert.deepEqual(tasksForDate(tasks, day).map(t => t.id), ['c', 'b', 'a']);
+});

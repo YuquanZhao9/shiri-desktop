@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 export const SHARED = ['types.ts', 'core.ts', 'timetable.ts', 'holidays.ts'];
-const from = new URL('../../拾日/src/', import.meta.url);
+const from = new URL('../../src/', import.meta.url);
 const to = new URL('../supabase/functions/_shared/', import.meta.url);
 
 export function denoSource(source) {

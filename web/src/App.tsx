@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode, TouchEvent } from 'react';
-import { Bell, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Share, Trash2, UserRound } from 'lucide-react';
+import { Bell, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Share, Star, Trash2, UserRound } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
-import { breaksOf, classesForDate, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
-import type { PeriodRow } from '@shared/timetable';
-import { createCloudClient, cloudErrorMessage, listsForTasks, syncTasks } from '@shared/cloud';
+import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
+import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
+import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
 import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncLists, syncTimetable } from './sync';
@@ -35,13 +35,14 @@ const endTime = (time: string, duration: number) => {
   return `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
 const hashDate = () => { const match = /^#date=(\d{4}-\d{2}-\d{2})$/.exec(location.hash); try { return match ? (parseDate(match[1]), match[1]) : ''; } catch { return ''; } };
+const hasPasswordRecoveryLink = () => new URLSearchParams(location.search).get('password-reset') === '1' || /(?:^|&)type=recovery(?:&|$)/.test(location.hash.slice(1));
 
 type Tab = 'calendar' | 'list' | 'timetable' | 'me';
 
 
 export default function App() {
   const [config, setConfig] = useState(cloudConfig);
-  const [client, setClient] = useState<SupabaseClient | null>(() => { try { return config ? createCloudClient(config.url, config.key) : null; } catch { return null; } });
+  const [client, setClient] = useState<SupabaseClient | null>(() => { try { return config ? createCloudClient(config.url, config.key, { detectSessionInUrl: true }) : null; } catch { return null; } });
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const storageKey = user && config ? accountKey(config.url, user.id) : LOCAL_KEY;
@@ -51,7 +52,8 @@ export default function App() {
   const [selected, setSelected] = useState(() => hashDate() || todayKey());
   const [cursor, setCursor] = useState(() => { const d = parseDate(hashDate() || todayKey()); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [compact, setCompact] = useState(() => pref('shiri-m-compact', 'false') === 'true');
-  const [tab, setTab] = useState<Tab>('calendar');
+  const [tab, setTab] = useState<Tab>(() => hasPasswordRecoveryLink() ? 'me' : 'calendar');
+  const [passwordRecovery, setPasswordRecovery] = useState(hasPasswordRecoveryLink);
   const [editing, setEditing] = useState<{ task: Task; isNew: boolean } | null>(null);
   const [quick, setQuick] = useState('');
   const [toast, setToast] = useState<{ text: string; undo?: Task } | null>(null);
@@ -60,7 +62,6 @@ export default function App() {
   const [lead, setLead] = useState(leadPref);
   const [germanState, setGermanState] = useState(statePref);
   const [showTimetable, setShowTimetable] = useState(() => pref('shiri-timetable', '1') !== '0');
-  const [pillCap, setPillCap] = useState(2);
   const gridRef = useRef<HTMLDivElement>(null);
   const [hideDone, setHideDone] = useState(() => pref('shiri-m-hide-done', 'false') === 'true');
 
@@ -99,7 +100,10 @@ export default function App() {
     if (!client) { setAuthChecked(true); return; }
     let active = true;
     const apply = (next: { id: string; email?: string } | null) => { if (active) { setUser(next); setAuthChecked(true); } };
-    const { data: listener } = client.auth.onAuthStateChange((_event, session) => apply(session?.user ?? null));
+    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') { setPasswordRecovery(true); setTab('me'); }
+      apply(session?.user ?? null);
+    });
     client.auth.getSession().then(({ data: result }) => apply(result.session?.user ?? null)).catch(() => apply(null));
     return () => { active = false; listener.subscription.unsubscribe(); };
   }, [client]);
@@ -243,16 +247,6 @@ export default function App() {
   const dayTasks = useMemo(() => tasksForDate(active, selected).filter(t => !hideDone || !isDone(t, selected)), [active, selected, hideDone]);
   const monthLabel = `${cursor.year}年${cursor.month + 1}月`;
 
-  // 日期格能放几条就放几条（与电脑版一致），放不下的显示 +N。
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid || compact) return;
-    // 观察整个网格（日期格换月时会重建）；每格内容高度 = 网格高度 / 6 行 − 内边距。
-    const observer = new ResizeObserver(([entry]) => setPillCap(Math.max(1, Math.floor((entry.contentRect.height / 6 - 4 - 35 - (showTimetable ? 7 : 0)) / 15))));
-    observer.observe(grid);
-    return () => observer.disconnect();
-  }, [compact, tab, showTimetable]);
-
   // ---------- 界面 ----------
   const row = (task: Task, date: string, showDate = false) => {
     const done = date ? isDone(task, date) : task.completed;
@@ -261,7 +255,7 @@ export default function App() {
       <li key={`${task.id}:${date}`} className={`task-row${done ? ' done' : ''}`} style={{ '--c': colorOf(task) } as React.CSSProperties}>
         <button className="check" aria-label={done ? '标为未完成' : '标为完成'} onClick={() => toggle(task, date)}>{done && <Check size={14} strokeWidth={3} />}</button>
         <button className="task-main" onClick={() => setEditing({ task, isNew: false })}>
-          <span className="task-title">{task.priority === 'high' && <b className="flag">!</b>}{task.title}</span>
+          <span className="task-title">{task.priority === 'high' && <Star className="flag" size={14} fill="currentColor" aria-label="星标" />}{task.title}</span>
           <span className="task-meta">
             {showDate && date && <span>{shortDay(date)}</span>}
             <span>{task.time ? `${task.time}–${endTime(task.time, task.duration)}` : (date ? '全天' : '未安排日期')}</span>
@@ -273,6 +267,20 @@ export default function App() {
       </li>
     );
   };
+
+  // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
+  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'task'
+    ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
+    : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR, ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
+
+  // 课程和日程排在同一列表里，统一用课程色。
+  const classRow = (slot: DayClass) => (
+    <li key={`class-${slot.id}`} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>
+      <span className="class-time">{slot.start}<br />{slot.end}</span>
+      <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
+    </li>
+  );
+  const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
 
   const calendar = (
     <section className="page calendar-page">
@@ -296,7 +304,7 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const classes = classRows(key);
+          const layout = cellLayout(dayAgenda(tasks, classRows(key)));
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
@@ -304,20 +312,13 @@ export default function App() {
                 {mark && <span className="badge">{mark.kind === 'rest' ? '休' : '班'}</span>}
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
-              <span className="pills">
-                {tasks.slice(0, compact ? 0 : pillCap).map(t => <span key={t.id} className={`pill${isDone(t, key) ? ' done' : ''}`} style={{ '--c': colorOf(t) } as React.CSSProperties}>{t.title}</span>)}
-                {compact ? tasks.length > 0 && <span className="dots">{tasks.slice(0, 3).map(t => <i key={t.id} style={{ background: colorOf(t) }} />)}</span>
-                  : tasks.length > pillCap && <span className="more">+{tasks.length - pillCap}</span>}
-              </span>
-              {classes && (compact
-                ? <span className="cell-classes">{classes.map(row => (
-                    <span key={row.start} className={`class-period${row.slots.length ? '' : ' empty'}`}>
-                      {row.slots.map(slot => <span key={slot.id} className={`class-chip${slot.dashed ? ' dashed' : ''}${slot.alert ? ' alert' : ''}`} style={{ '--c': slot.color } as React.CSSProperties}>{timetable.courses.find(course => course.code && slot.title.includes(course.code))?.code ?? slot.title.slice(0, 2)}</span>)}
-                    </span>
-                  ))}</span>
-                : <span className="class-strip">{classes.map(row => row.slots.length
-                    ? <i key={row.start} className={row.slots.every(slot => slot.dashed) ? 'dashed' : ''} style={{ '--c': row.slots[0].color } as React.CSSProperties} />
-                    : <i key={row.start} className="empty" />)}</span>)}
+              <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
+              {layout.untimed.length > 0 && (compact
+                ? <span className="pills">
+                    {layout.untimed.slice(0, 2).map(item => pill(item, key))}
+                    {layout.untimed.length > 2 && <span className="more">+{layout.untimed.length - 2}</span>}
+                  </span>
+                : <span className="dots untimed">{layout.untimed.slice(0, 4).map(item => item.kind === 'task' && <i key={item.task.id} style={{ background: colorOf(item.task) }} />)}</span>)}
             </button>
           );
         })}
@@ -332,19 +333,8 @@ export default function App() {
           <input value={quick} onChange={e => setQuick(e.target.value)} placeholder="添加日程，如“15:00 开会”" enterKeyHint="done" maxLength={200} />
           {quick && <button type="submit" className="quick-save">添加</button>}
         </form>
-        {dayTasks.length ? <ul className="tasks">{dayTasks.map(t => row(t, selected))}</ul>
+        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
-        {classRows(selected) && (
-          <div className="group">
-            <h3><GraduationCap size={14} />课程 · {timetable.name}</h3>
-            <ul className="tasks classes">{classRows(selected)!.map(row => row.slots.length ? row.slots.map(slot => (
-              <li key={slot.id} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': slot.color } as React.CSSProperties}>
-                <span className="class-time">{slot.start}<br />{slot.end}</span>
-                <span className="class-main"><b>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
-              </li>
-            )) : <li key={row.start} className="class-row free"><span className="class-time">{row.start}</span><span className="class-main"><small>空闲</small></span></li>)}</ul>
-          </div>
-        )}
       </div>
     </section>
   );
@@ -388,6 +378,12 @@ export default function App() {
             onGermanState={value => { setGermanState(value); setPref('shiri-de-state', value); }} say={say} sync={() => void runSync()}
             onConfig={(url, key) => { const next = saveCloudConfig(url, key); setClient(next); setConfig(cloudConfig()); }}
             onPush={setPushOn}
+            passwordRecovery={passwordRecovery}
+            onRecoveryComplete={() => {
+              setPasswordRecovery(false);
+              const clean = new URL(location.href); clean.searchParams.delete('password-reset'); clean.hash = '';
+              history.replaceState(null, '', `${clean.pathname}${clean.search}`);
+            }}
             onLead={async value => {
               setLead(value); setPref('shiri-reminder-lead', String(value));
               const sub = await currentSubscription();
@@ -438,7 +434,7 @@ function Group({ title, count, warn, children }: { title: string; count: number;
 
 function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task; isNew: boolean; lists: TaskList[]; onSave: (task: Task, isNew: boolean) => void; onDelete: (task: Task) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(task);
-  const [more, setMore] = useState(!isNew && (task.repeat !== 'none' || task.priority === 'high'));
+  const [more, setMore] = useState(!isNew && task.repeat !== 'none');
   const set = <K extends keyof Task>(key: K, value: Task[K]) => setDraft(prev => ({ ...prev, [key]: value }));
   const title = useRef<HTMLInputElement>(null);
   useEffect(() => { if (isNew) setTimeout(() => title.current?.focus(), 60); }, [isNew]);
@@ -488,7 +484,10 @@ function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task;
               {TASK_COLORS.map(color => <button type="button" key={color} className={`swatch${draft.color === color ? ' on' : ''}`} style={{ '--c': color } as React.CSSProperties} onClick={() => set('color', color)} aria-label={`颜色 ${color}`} />)}
             </span>
           </div>
-          {!more && <button type="button" className="more-btn" onClick={() => setMore(true)}>重复、优先级…</button>}
+          <label className="field"><span>星标</span>
+            <input type="checkbox" className="switch" checked={draft.priority === 'high'} onChange={e => set('priority', e.target.checked ? 'high' : 'normal')} />
+          </label>
+          {!more && draft.date && <button type="button" className="more-btn" onClick={() => setMore(true)}>重复…</button>}
           {more && <>
             {draft.date && (
               <label className="field"><span>重复</span>
@@ -497,9 +496,6 @@ function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task;
                 </select>
               </label>
             )}
-            <label className="field"><span>重要</span>
-              <input type="checkbox" className="switch" checked={draft.priority === 'high'} onChange={e => set('priority', e.target.checked ? 'high' : 'normal')} />
-            </label>
           </>}
         </div>
         {!isNew && <button type="button" className="delete-btn" onClick={() => onDelete(task)}><Trash2 size={17} />删除日程</button>}
@@ -513,11 +509,16 @@ interface MeProps {
   syncState: string; data: AppData; pushOn: boolean; lead: number; germanState: GermanState; onGermanState: (value: GermanState) => void;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
+  passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, say, sync, onConfig, onPush, onLead, onMergeLocal }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetOffer, setResetOffer] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState(config?.url ?? '');
   const [key, setKey] = useState(config?.baked ? '' : config?.key ?? '');
@@ -528,10 +529,43 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
     if (!client) return;
     setBusy(true);
     try {
-      const result = mode === 'in' ? await client.auth.signInWithPassword({ email: email.trim(), password }) : await client.auth.signUp({ email: email.trim(), password });
-      if (result.error) throw result.error;
+      if (mode === 'in') await signIn(client, email, password);
+      else {
+        const result = await signUp(client, email, password);
+        if (result.alreadyRegistered) {
+          setResetOffer(email.trim());
+          say('该邮箱已被注册。是否发送重置密码邮件？');
+          return;
+        }
+      }
       setPassword('');
-      say(mode === 'up' && !result.data.session ? '注册成功，请打开邮箱里的确认邮件，然后回来登录' : '已登录，正在同步');
+      setResetOffer('');
+      say(mode === 'up' ? '注册成功，请打开邮箱里的确认邮件，然后回来登录' : '已登录，正在同步');
+    } catch (error) { say(cloudErrorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  async function sendReset(target = email) {
+    if (!client) return;
+    setBusy(true);
+    try {
+      const redirect = location.protocol === 'http:' || location.protocol === 'https:'
+        ? `${location.origin}${location.pathname}?password-reset=1`
+        : PASSWORD_RESET_REDIRECT;
+      await requestPasswordReset(client, target, redirect);
+      setResetOffer('');
+      say('重置邮件已发送。请在邮箱打开链接，设置新密码；当前日程不会被删除。');
+    } catch (error) { say(cloudErrorMessage(error)); }
+    finally { setBusy(false); }
+  }
+  async function saveNewPassword() {
+    if (!client) return;
+    if (newPassword !== confirmPassword) { say('两次输入的新密码不一致。'); return; }
+    setBusy(true);
+    try {
+      await updatePassword(client, newPassword);
+      setNewPassword(''); setConfirmPassword(''); setChangingPassword(false);
+      onRecoveryComplete();
+      say('新密码已保存。账号和现有日程保持不变。');
     } catch (error) { say(cloudErrorMessage(error)); }
     finally { setBusy(false); }
   }
@@ -564,7 +598,14 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
 
         <div className="card">
           <h3><Cloud size={17} />云同步</h3>
-          {!config || showConfig ? (
+          {passwordRecovery ? (
+            <form className="stack" onSubmit={event => { event.preventDefault(); void saveNewPassword(); }}>
+              <p className="muted">正在为当前账号设置新密码。修改密码不会删除手机、电脑或云端日程。</p>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="新密码（至少 8 位）" autoComplete="new-password" />
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" autoComplete="new-password" />
+              <button className="primary" type="submit" disabled={busy || newPassword.length < 8 || confirmPassword.length < 8}>保存新密码</button>
+            </form>
+          ) : !config || showConfig ? (
             <form className="stack" onSubmit={e => { e.preventDefault(); try { onConfig(url, key); setShowConfig(false); say('已连接云项目，请登录'); } catch (error) { say((error as Error).message); } }}>
               <p className="muted">填入 Supabase 项目的地址和 Publishable key（公开密钥）。</p>
               <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" inputMode="url" autoCapitalize="off" autoCorrect="off" />
@@ -580,6 +621,11 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
                 <button className="secondary" onClick={sync}><RefreshCw size={16} />立即同步</button>
                 <button className="secondary" onClick={async () => { if (pushOn) await disablePush(client).catch(() => {}); onPush(false); await client!.auth.signOut({ scope: 'local' }); say('已退出，本机仍保留该账号的数据'); }}><LogOut size={16} />退出</button>
               </div>
+              {changingPassword ? <form className="stack password-change" onSubmit={event => { event.preventDefault(); void saveNewPassword(); }}>
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="新密码（至少 8 位）" autoComplete="new-password" />
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再次输入新密码" autoComplete="new-password" />
+                <div className="row-btns"><button className="primary" type="submit" disabled={busy || newPassword.length < 8 || confirmPassword.length < 8}>保存新密码</button><button className="secondary" type="button" onClick={() => { setChangingPassword(false); setNewPassword(''); setConfirmPassword(''); }}>取消</button></div>
+              </form> : <button className="link-btn" onClick={() => setChangingPassword(true)}>修改密码</button>}
               <button className="link-btn" onClick={onMergeLocal}>把未登录时记下的日程并入此账号</button>
             </div>
           ) : (
@@ -591,6 +637,8 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
                 <button className="primary" type="submit" disabled={busy || !email || password.length < 6}>登录</button>
                 <button className="secondary" type="button" disabled={busy || !email || password.length < 6} onClick={() => void auth('up')}>注册</button>
               </div>
+              <button className="link-btn" type="button" disabled={busy || !email} onClick={() => void sendReset()}>忘记密码？发送重置邮件</button>
+              {resetOffer && <div className="reset-offer" role="alert"><p>该邮箱已被注册。是否发送重置密码邮件？</p><div className="row-btns"><button className="primary" type="button" disabled={busy} onClick={() => void sendReset(resetOffer)}>发送重置邮件</button><button className="secondary" type="button" onClick={() => setResetOffer('')}>暂不</button></div></div>}
             </form>
           )}
           {config && !config.baked && !showConfig && <button className="link-btn" onClick={() => setShowConfig(true)}>更改云项目</button>}
@@ -603,10 +651,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
           {!VAPID_PUBLIC_KEY ? <p className="muted">云端提醒服务还没配置。</p> : !standalone ? <p className="muted">从主屏幕图标打开昱时后才能开启提醒。</p> : !pushSupported() ? <p className="muted">需要 iOS 16.4 或更高版本。</p> : (
             <div className="stack">
               <label className="kv"><span>推送到这台手机</span><input type="checkbox" className="switch" checked={pushOn} disabled={busy || !user} onChange={() => void togglePush()} /></label>
-              <label className="kv"><span>提前</span>
-                <select value={lead} onChange={e => onLead(Number(e.target.value))}>{LEADS.map(m => <option key={m} value={m}>{m ? `${m} 分钟` : '准时'}</option>)}</select>
-              </label>
-              <p className="muted">只提醒设了具体时间的日程。{!user && '登录后可开启。'}</p>
+              <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
             </div>
           )}
         </div>
@@ -741,4 +786,23 @@ function AiTokenCard({ client, userId, projectUrl, say }: { client: SupabaseClie
       )}
     </div>
   );
+}
+
+/** 日期格的时间轴：6–20 点每小时一格，0–6、20–24 各压成一格；太短放不下字的只显示色条。 */
+function CellHours({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const measure = useCallback(() => {
+    const element = box.current;
+    if (!element) return;
+    for (const item of Array.from(element.children) as HTMLElement[]) item.classList.toggle('bar', item.offsetHeight < 11);
+  }, []);
+  useEffect(() => { measure(); });
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [measure]);
+  return <span className="cell-hours" ref={box}>{children}</span>;
 }
