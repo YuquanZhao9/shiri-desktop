@@ -4,8 +4,8 @@ import { Bell, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
-import { breaksOf, classesForDate, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
-import type { PeriodRow } from '@shared/timetable';
+import { breaksOf, classesForDate, CLASS_COLOR, dayAgenda, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
+import type { DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
@@ -253,10 +253,10 @@ export default function App() {
     const grid = gridRef.current;
     if (!grid || compact) return;
     // 观察整个网格（日期格换月时会重建）；每格内容高度 = 网格高度 / 6 行 − 内边距。
-    const observer = new ResizeObserver(([entry]) => setPillCap(Math.max(1, Math.floor((entry.contentRect.height / 6 - 4 - 35 - (showTimetable ? 7 : 0)) / 15))));
+    const observer = new ResizeObserver(([entry]) => setPillCap(Math.max(1, Math.floor((entry.contentRect.height / 6 - 4 - 35) / 15))));
     observer.observe(grid);
     return () => observer.disconnect();
-  }, [compact, tab, showTimetable]);
+  }, [compact, tab]);
 
   // ---------- 界面 ----------
   const row = (task: Task, date: string, showDate = false) => {
@@ -278,6 +278,15 @@ export default function App() {
       </li>
     );
   };
+
+  // 课程和日程排在同一列表里，统一用课程色。
+  const classRow = (slot: DayClass) => (
+    <li key={`class-${slot.id}`} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>
+      <span className="class-time">{slot.start}<br />{slot.end}</span>
+      <span className="class-main"><b>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
+    </li>
+  );
+  const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
 
   const calendar = (
     <section className="page calendar-page">
@@ -301,7 +310,8 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const classes = classRows(key);
+          const items = dayAgenda(tasks, classRows(key));
+          const cap = compact ? 8 : pillCap;
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
@@ -310,19 +320,11 @@ export default function App() {
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
               <span className="pills">
-                {tasks.slice(0, compact ? 0 : pillCap).map(t => <span key={t.id} className={`pill${isDone(t, key) ? ' done' : ''}`} style={{ '--c': colorOf(t) } as React.CSSProperties}>{t.title}</span>)}
-                {compact ? tasks.length > 0 && <span className="dots">{tasks.slice(0, 3).map(t => <i key={t.id} style={{ background: colorOf(t) }} />)}</span>
-                  : tasks.length > pillCap && <span className="more">+{tasks.length - pillCap}</span>}
+                {items.slice(0, cap).map(item => item.kind === 'task'
+                  ? <span key={item.task.id} className={`pill${isDone(item.task, key) ? ' done' : ''}`} style={{ '--c': colorOf(item.task) } as React.CSSProperties}>{item.task.title}</span>
+                  : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>{item.slot.title}</span>)}
+                {items.length > cap && <span className="more">+{items.length - cap}</span>}
               </span>
-              {classes && (compact
-                ? <span className="cell-classes">{classes.map(row => (
-                    <span key={row.start} className={`class-period${row.slots.length ? '' : ' empty'}`}>
-                      {row.slots.map(slot => <span key={slot.id} className={`class-chip${slot.dashed ? ' dashed' : ''}${slot.alert ? ' alert' : ''}`} style={{ '--c': slot.color } as React.CSSProperties}>{timetable.courses.find(course => course.code && slot.title.includes(course.code))?.code ?? slot.title.slice(0, 2)}</span>)}
-                    </span>
-                  ))}</span>
-                : <span className="class-strip">{classes.map(row => row.slots.length
-                    ? <i key={row.start} className={row.slots.every(slot => slot.dashed) ? 'dashed' : ''} style={{ '--c': row.slots[0].color } as React.CSSProperties} />
-                    : <i key={row.start} className="empty" />)}</span>)}
             </button>
           );
         })}
@@ -337,19 +339,8 @@ export default function App() {
           <input value={quick} onChange={e => setQuick(e.target.value)} placeholder="添加日程，如“15:00 开会”" enterKeyHint="done" maxLength={200} />
           {quick && <button type="submit" className="quick-save">添加</button>}
         </form>
-        {dayTasks.length ? <ul className="tasks">{dayTasks.map(t => row(t, selected))}</ul>
+        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
-        {classRows(selected) && (
-          <div className="group">
-            <h3><GraduationCap size={14} />课程 · {timetable.name}</h3>
-            <ul className="tasks classes">{classRows(selected)!.map(row => row.slots.length ? row.slots.map(slot => (
-              <li key={slot.id} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': slot.color } as React.CSSProperties}>
-                <span className="class-time">{slot.start}<br />{slot.end}</span>
-                <span className="class-main"><b>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
-              </li>
-            )) : <li key={row.start} className="class-row free"><span className="class-time">{row.start}</span><span className="class-main"><small>空闲</small></span></li>)}</ul>
-          </div>
-        )}
       </div>
     </section>
   );

@@ -201,7 +201,7 @@ svg { flex-shrink: 0; }
 
 /* ---------- 当天课程 ---------- */
 .class-row { display: flex; align-items: stretch; min-height: 52px; border-left: 3px solid var(--c); background: color-mix(in srgb, var(--c) 7%, var(--card)); }
-.class-row + .class-row { border-top: 1px solid var(--line); }
+.class-row + .class-row, .class-row + .task-row, .task-row + .class-row { border-top: 1px solid var(--line); }
 .class-row.dashed { border-left-style: dashed; opacity: .78; }
 .class-time { width: 56px; flex-shrink: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.35; }
 .class-main { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 8px 12px 8px 0; }
@@ -235,26 +235,12 @@ svg { flex-shrink: 0; }
   .tt-slot { color: color-mix(in srgb, var(--c) 60%, white); }
 }
 
-/* ---------- 日期格里的课表（与电脑版一致：5 个时段，空时段淡虚线） ---------- */
-.class-strip { position: absolute; left: 4px; right: 4px; bottom: 3px; display: flex; gap: 2px; height: 4px; }
-.class-strip i { flex: 1; border-radius: 2px; background: var(--c); }
-.class-strip i.dashed { background: none; border: 1px dashed var(--c); }
-.class-strip i.empty { background: none; border: 1px dashed color-mix(in srgb, var(--muted) 45%, transparent); }
-.cell.outside .class-strip { opacity: .35; }
 .grid.compact { grid-auto-rows: 150px; }
-.cell-classes { display: grid; grid-auto-rows: 17px; gap: 2px; margin-top: auto; padding-top: 3px; }
-.class-period { display: flex; gap: 1px; min-width: 0; border-radius: 3px; }
-.class-period.empty { border: 1px dashed color-mix(in srgb, var(--muted) 40%, transparent); }
-.class-chip { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; border-radius: 3px; font-size: 9.5px; font-weight: 600; overflow: hidden; white-space: nowrap; background: color-mix(in srgb, var(--c) 22%, var(--card)); color: color-mix(in srgb, var(--c) 72%, #1d2030); border-left: 2px solid var(--c); }
-.class-chip.dashed { background: none; border: 1px dashed var(--c); }
-.class-row.free { min-height: 34px; border-left: 3px dashed color-mix(in srgb, var(--muted) 40%, transparent); background: none; }
-.class-row.free .class-time { font-size: 11px; }
+/* 课程和日程排在同一列表里，统一颜色；虚线表示不去现场或可调整。 */
+.pill.class.dashed { background: none; outline: 1px dashed var(--c); outline-offset: -1px; }
+.pill.class.alert { box-shadow: inset 0 -2px 0 #e5534b; }
 .icon-btn.on { background: var(--accent-soft); }
-@media (prefers-color-scheme: dark) {
-  .class-chip { color: color-mix(in srgb, var(--c) 60%, white); }
-}
 .class-main small.alert { color: #d0782a; }
-.class-chip.alert { box-shadow: inset 0 -2px 0 #e5534b; }
 .legend h3 { margin: 0 0 2px; font-size: 14px; }
 .token { display: block; padding: 10px 12px; border-radius: 10px; background: #f1f2f6; font-size: 13px; word-break: break-all; user-select: all; -webkit-user-select: all; }
 .token-url { margin-top: 8px; }

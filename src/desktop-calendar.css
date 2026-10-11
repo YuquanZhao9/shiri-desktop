@@ -188,16 +188,11 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .timetable-row input[type=color] { width:32px; height:28px; padding:1px; }
 .timetable-row .dashed-toggle { display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap; }
 
-/* Classes inside each day cell, one row per period that has a class that day. */
-.cell-classes { flex:0 1 auto; min-height:0; display:grid; grid-auto-rows:minmax(9px, 19px); gap:2px; margin-top:4px; overflow:hidden; }
-.class-period { display:flex; align-items:stretch; gap:3px; min-height:0; min-width:0; }
-.class-period small { flex:none; width:30px; align-self:center; font-size:9px; line-height:1; color:#d6e3f0a0; }
-.class-period.empty { border:1px dashed #ffffff26; border-radius:3px; }
-.class-period.empty small { padding-left:3px; color:#d6e3f066; }
-.class-chip { flex:1 1 0; min-width:0; display:flex; align-items:center; padding:0 5px; border-radius:3px; border-left:3px solid var(--slot-color); background:color-mix(in srgb, var(--slot-color) 30%, transparent); color:#eef5fc; font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.class-chip.dashed { border:1px dashed var(--slot-color); border-left:3px dashed var(--slot-color); background:color-mix(in srgb, var(--slot-color) 10%, transparent); }
-.desktop-calendar[data-span='month'] .class-period small { display:none; }
 .timetable-breaks { display:flex; flex-direction:column; gap:6px; margin:10px 0; }
 .timetable-row.break-row { grid-template-columns:minmax(120px,1fr) 140px 140px 30px; }
-.class-chip.alert { box-shadow:inset 0 0 0 1px #ffc86b; }
-.class-chip b { flex:none; margin-right:3px; color:#ffcf73; font-weight:700; }
+
+/* Classes sit among the day's events in one shared color; dashed = not on site or flexible. */
+.calendar-event.class-event { cursor:default; }
+.calendar-event.class-event.dashed { background:transparent; outline:1px dashed color-mix(in srgb, var(--event-color), white 30%); outline-offset:-1px; }
+.calendar-event.class-event.alert { box-shadow:inset 0 0 0 1px #ffc86b; }
+.calendar-event.class-event b { flex:none; color:#ffcf73; font-weight:700; }

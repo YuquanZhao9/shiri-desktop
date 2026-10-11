@@ -1,4 +1,4 @@
-import type { Timetable, TimetableAlert, TimetableBreak, TimetableCourse, TimetableSlot } from './types';
+import type { Task, Timetable, TimetableAlert, TimetableBreak, TimetableCourse, TimetableSlot } from './types';
 
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -158,4 +158,20 @@ export function breaksOf(timetable: Timetable): TimetableBreak[] {
 /** The timetable to show: the user's saved one, or the preset when nothing newer than the preset was saved. */
 export function effectiveTimetable(saved: Timetable | undefined): Timetable {
   return !saved || saved.updatedAt <= DEFAULT_TIMETABLE.updatedAt ? DEFAULT_TIMETABLE : saved;
+}
+
+/** All classes share one color so they read as one kind of entry among the day's events. */
+export const CLASS_COLOR = '#2A9D8F';
+
+export type AgendaItem = { kind: 'task'; time: string; task: Task } | { kind: 'class'; time: string; slot: DayClass };
+
+/** A day's events and classes in one list by start time; untimed events go last. */
+export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null): AgendaItem[] {
+  const items: AgendaItem[] = [
+    ...(classes ?? []).flatMap(row => row.slots.map(slot => ({ kind: 'class' as const, time: slot.start, slot }))),
+    ...tasks.map(task => ({ kind: 'task' as const, time: task.time, task })),
+  ];
+  return items.map((item, index) => ({ item, index })).sort((a, b) =>
+    Number(!a.item.time) - Number(!b.item.time) || a.item.time.localeCompare(b.item.time) || a.index - b.index,
+  ).map(entry => entry.item);
 }

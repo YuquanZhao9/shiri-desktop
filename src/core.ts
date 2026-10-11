@@ -109,8 +109,9 @@ export function moveTask(task: Task, oldDate: string, newDate: string, time?: st
 }
 
 export function tasksForDate(tasks: Task[], key: string): Task[] {
+  // By start time; untimed (all-day) entries go last.
   return tasks.filter(task => occursOn(task, key)).sort((a, b) =>
-    Number(isDone(a, key)) - Number(isDone(b, key)) ||
+    Number(!a.time) - Number(!b.time) ||
     a.time.localeCompare(b.time) ||
     Number(b.priority === 'high') - Number(a.priority === 'high') ||
     a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),

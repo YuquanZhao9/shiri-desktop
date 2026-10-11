@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultData, validateBackup } from '../src/core';
-import { DEFAULT_TIMETABLE, newerTimetable, slotsForWeekday, validateTimetable } from '../src/timetable';
+import { CLASS_COLOR, DEFAULT_TIMETABLE, dayAgenda, newerTimetable, slotsForWeekday, validateTimetable } from '../src/timetable';
 import { mergeWindowData } from '../src/window-data';
 import type { Task } from '../src/types';
 
@@ -91,4 +91,12 @@ test('clash dates carry a warning on that class only, and old preset saves follo
   const edited = { ...DEFAULT_TIMETABLE, name: '我的课表', updatedAt: '2026-10-01T00:00:00.000Z' };
   assert.equal(effectiveTimetable(edited), edited);
   assert.equal(effectiveTimetable(undefined), DEFAULT_TIMETABLE);
+});
+
+test('classes join the events in one time-ordered list, untimed events last', () => {
+  const event = (id: string, time: string): Task => ({ id, title: id, date: '2026-10-12', time, duration: 60, listId: 'work', notes: '', priority: 'normal', repeat: 'none', completed: false, doneDates: [], createdAt: '', updatedAt: '' });
+  const slot = { id: 's1', day: 1, start: '10:00', end: '11:30', title: 'Math', note: '', color: '#E5534B', dashed: false };
+  const items = dayAgenda([event('morning', '08:00'), event('noon', '12:00'), event('anytime', '')], [{ start: '10:00', slots: [slot] }]);
+  assert.deepEqual(items.map(item => item.kind === 'task' ? item.task.id : item.slot.id), ['morning', 's1', 'noon', 'anytime']);
+  assert.match(CLASS_COLOR, /^#[0-9A-F]{6}$/);
 });
