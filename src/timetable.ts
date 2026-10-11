@@ -175,3 +175,50 @@ export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null): AgendaIte
     Number(!a.item.time) - Number(!b.item.time) || a.item.time.localeCompare(b.item.time) || a.index - b.index,
   ).map(entry => entry.item);
 }
+
+const clock = (time: string): number => {
+  const [hours, minutes] = time.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+
+/**
+ * Vertical position (0–1) of a time of day in a date cell. 06–20 get one slot per hour;
+ * the quiet hours 00–06 and 20–24 are each squeezed into a single slot, 16 slots in all.
+ */
+export function dayFraction(minutes: number): number {
+  const m = Math.min(Math.max(minutes, 0), 1440);
+  const slot = m < 360 ? m / 360 : m < 1200 ? 1 + (m - 360) / 60 : 15 + (m - 1200) / 240;
+  return slot / 16;
+}
+
+export interface PlacedItem { item: AgendaItem; top: number; height: number; lane: number; lanes: number }
+
+/** Where each timed entry sits in a date cell (overlaps share the width side by side); untimed entries are listed apart. */
+export function cellLayout(items: AgendaItem[], minHeight = 0.06): { timed: PlacedItem[]; untimed: AgendaItem[] } {
+  const untimed = items.filter(item => !item.time);
+  const spans = items.filter(item => item.time).map(item => {
+    const start = clock(item.time);
+    let end = item.kind === 'task' ? start + item.task.duration : clock(item.slot.end);
+    if (end <= start) end = start + 60;
+    const top = dayFraction(start);
+    const height = Math.max(dayFraction(end) - top, minHeight);
+    return { item, top: Math.min(top, 1 - height), height };
+  }).sort((a, b) => a.top - b.top || b.height - a.height);
+  const timed: PlacedItem[] = [];
+  let cluster: PlacedItem[] = [];
+  let ends: number[] = [];
+  let clusterEnd = -1;
+  const close = () => { for (const placed of cluster) placed.lanes = ends.length; cluster = []; ends = []; };
+  for (const span of spans) {
+    if (span.top >= clusterEnd - 1e-9) { close(); clusterEnd = -1; }
+    let lane = ends.findIndex(end => end <= span.top + 1e-9);
+    if (lane === -1) lane = ends.length;
+    ends[lane] = span.top + span.height;
+    clusterEnd = Math.max(clusterEnd, span.top + span.height);
+    const placed = { ...span, lane, lanes: 1 };
+    cluster.push(placed);
+    timed.push(placed);
+  }
+  close();
+  return { timed, untimed };
+}

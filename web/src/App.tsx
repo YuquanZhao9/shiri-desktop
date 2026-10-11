@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode, TouchEvent } from 'react';
-import { Bell, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Share, Trash2, UserRound } from 'lucide-react';
+import { Bell, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Share, Star, Trash2, UserRound } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
-import { breaksOf, classesForDate, CLASS_COLOR, dayAgenda, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
-import type { DayClass, PeriodRow } from '@shared/timetable';
+import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
+import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
@@ -62,7 +62,6 @@ export default function App() {
   const [lead, setLead] = useState(leadPref);
   const [germanState, setGermanState] = useState(statePref);
   const [showTimetable, setShowTimetable] = useState(() => pref('shiri-timetable', '1') !== '0');
-  const [pillCap, setPillCap] = useState(2);
   const gridRef = useRef<HTMLDivElement>(null);
   const [hideDone, setHideDone] = useState(() => pref('shiri-m-hide-done', 'false') === 'true');
 
@@ -248,16 +247,6 @@ export default function App() {
   const dayTasks = useMemo(() => tasksForDate(active, selected).filter(t => !hideDone || !isDone(t, selected)), [active, selected, hideDone]);
   const monthLabel = `${cursor.year}年${cursor.month + 1}月`;
 
-  // 日期格能放几条就放几条（与电脑版一致），放不下的显示 +N。
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid || compact) return;
-    // 观察整个网格（日期格换月时会重建）；每格内容高度 = 网格高度 / 6 行 − 内边距。
-    const observer = new ResizeObserver(([entry]) => setPillCap(Math.max(1, Math.floor((entry.contentRect.height / 6 - 4 - 35) / 15))));
-    observer.observe(grid);
-    return () => observer.disconnect();
-  }, [compact, tab]);
-
   // ---------- 界面 ----------
   const row = (task: Task, date: string, showDate = false) => {
     const done = date ? isDone(task, date) : task.completed;
@@ -266,7 +255,7 @@ export default function App() {
       <li key={`${task.id}:${date}`} className={`task-row${done ? ' done' : ''}`} style={{ '--c': colorOf(task) } as React.CSSProperties}>
         <button className="check" aria-label={done ? '标为未完成' : '标为完成'} onClick={() => toggle(task, date)}>{done && <Check size={14} strokeWidth={3} />}</button>
         <button className="task-main" onClick={() => setEditing({ task, isNew: false })}>
-          <span className="task-title">{task.priority === 'high' && <b className="flag">!</b>}{task.title}</span>
+          <span className="task-title">{task.priority === 'high' && <Star className="flag" size={14} fill="currentColor" aria-label="星标" />}{task.title}</span>
           <span className="task-meta">
             {showDate && date && <span>{shortDay(date)}</span>}
             <span>{task.time ? `${task.time}–${endTime(task.time, task.duration)}` : (date ? '全天' : '未安排日期')}</span>
@@ -279,11 +268,16 @@ export default function App() {
     );
   };
 
+  // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
+  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'task'
+    ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
+    : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR, ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
+
   // 课程和日程排在同一列表里，统一用课程色。
   const classRow = (slot: DayClass) => (
     <li key={`class-${slot.id}`} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>
       <span className="class-time">{slot.start}<br />{slot.end}</span>
-      <span className="class-main"><b>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
+      <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
     </li>
   );
   const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
@@ -310,8 +304,7 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const items = dayAgenda(tasks, classRows(key));
-          const cap = compact ? 8 : pillCap;
+          const layout = cellLayout(dayAgenda(tasks, classRows(key)));
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
@@ -319,12 +312,13 @@ export default function App() {
                 {mark && <span className="badge">{mark.kind === 'rest' ? '休' : '班'}</span>}
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
-              <span className="pills">
-                {items.slice(0, cap).map(item => item.kind === 'task'
-                  ? <span key={item.task.id} className={`pill${isDone(item.task, key) ? ' done' : ''}`} style={{ '--c': colorOf(item.task) } as React.CSSProperties}>{item.task.title}</span>
-                  : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>{item.slot.title}</span>)}
-                {items.length > cap && <span className="more">+{items.length - cap}</span>}
-              </span>
+              <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
+              {layout.untimed.length > 0 && (compact
+                ? <span className="pills">
+                    {layout.untimed.slice(0, 2).map(item => pill(item, key))}
+                    {layout.untimed.length > 2 && <span className="more">+{layout.untimed.length - 2}</span>}
+                  </span>
+                : <span className="dots untimed">{layout.untimed.slice(0, 4).map(item => item.kind === 'task' && <i key={item.task.id} style={{ background: colorOf(item.task) }} />)}</span>)}
             </button>
           );
         })}
@@ -440,7 +434,7 @@ function Group({ title, count, warn, children }: { title: string; count: number;
 
 function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task; isNew: boolean; lists: TaskList[]; onSave: (task: Task, isNew: boolean) => void; onDelete: (task: Task) => void; onClose: () => void }) {
   const [draft, setDraft] = useState(task);
-  const [more, setMore] = useState(!isNew && (task.repeat !== 'none' || task.priority === 'high'));
+  const [more, setMore] = useState(!isNew && task.repeat !== 'none');
   const set = <K extends keyof Task>(key: K, value: Task[K]) => setDraft(prev => ({ ...prev, [key]: value }));
   const title = useRef<HTMLInputElement>(null);
   useEffect(() => { if (isNew) setTimeout(() => title.current?.focus(), 60); }, [isNew]);
@@ -490,7 +484,10 @@ function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task;
               {TASK_COLORS.map(color => <button type="button" key={color} className={`swatch${draft.color === color ? ' on' : ''}`} style={{ '--c': color } as React.CSSProperties} onClick={() => set('color', color)} aria-label={`颜色 ${color}`} />)}
             </span>
           </div>
-          {!more && <button type="button" className="more-btn" onClick={() => setMore(true)}>重复、优先级…</button>}
+          <label className="field"><span>星标</span>
+            <input type="checkbox" className="switch" checked={draft.priority === 'high'} onChange={e => set('priority', e.target.checked ? 'high' : 'normal')} />
+          </label>
+          {!more && draft.date && <button type="button" className="more-btn" onClick={() => setMore(true)}>重复…</button>}
           {more && <>
             {draft.date && (
               <label className="field"><span>重复</span>
@@ -499,9 +496,6 @@ function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task;
                 </select>
               </label>
             )}
-            <label className="field"><span>重要</span>
-              <input type="checkbox" className="switch" checked={draft.priority === 'high'} onChange={e => set('priority', e.target.checked ? 'high' : 'normal')} />
-            </label>
           </>}
         </div>
         {!isNew && <button type="button" className="delete-btn" onClick={() => onDelete(task)}><Trash2 size={17} />删除日程</button>}
@@ -792,4 +786,23 @@ function AiTokenCard({ client, userId, projectUrl, say }: { client: SupabaseClie
       )}
     </div>
   );
+}
+
+/** 日期格的时间轴：6–20 点每小时一格，0–6、20–24 各压成一格；太短放不下字的只显示色条。 */
+function CellHours({ children }: { children: ReactNode }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const measure = useCallback(() => {
+    const element = box.current;
+    if (!element) return;
+    for (const item of Array.from(element.children) as HTMLElement[]) item.classList.toggle('bar', item.offsetHeight < 11);
+  }, []);
+  useEffect(() => { measure(); });
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [measure]);
+  return <span className="cell-hours" ref={box}>{children}</span>;
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultData, validateBackup } from '../src/core';
-import { CLASS_COLOR, DEFAULT_TIMETABLE, dayAgenda, newerTimetable, slotsForWeekday, validateTimetable } from '../src/timetable';
+import { CLASS_COLOR, DEFAULT_TIMETABLE, cellLayout, dayAgenda, dayFraction, newerTimetable, slotsForWeekday, validateTimetable } from '../src/timetable';
 import { mergeWindowData } from '../src/window-data';
 import type { Task } from '../src/types';
 
@@ -99,4 +99,20 @@ test('classes join the events in one time-ordered list, untimed events last', ()
   const items = dayAgenda([event('morning', '08:00'), event('noon', '12:00'), event('anytime', '')], [{ start: '10:00', slots: [slot] }]);
   assert.deepEqual(items.map(item => item.kind === 'task' ? item.task.id : item.slot.id), ['morning', 's1', 'noon', 'anytime']);
   assert.match(CLASS_COLOR, /^#[0-9A-F]{6}$/);
+});
+
+test('date cells give 06–20 one slot per hour and squeeze 00–06 and 20–24 into one slot each', () => {
+  assert.equal(dayFraction(0), 0);
+  assert.equal(dayFraction(6 * 60), 1 / 16);
+  assert.equal(dayFraction(12 * 60), 7 / 16);
+  assert.equal(dayFraction(20 * 60), 15 / 16);
+  assert.equal(dayFraction(24 * 60), 1);
+  const event = (id: string, time: string, duration = 60): Task => ({ id, title: id, date: '2026-10-12', time, duration, listId: 'work', notes: '', priority: 'normal', repeat: 'none', completed: false, doneDates: [], createdAt: '', updatedAt: '' });
+  const { timed, untimed } = cellLayout(dayAgenda([event('a', '09:00', 120), event('b', '10:00'), event('c', '14:00'), event('d', '')], null));
+  assert.deepEqual(untimed.map(item => item.kind === 'task' && item.task.id), ['d']);
+  const byId = Object.fromEntries(timed.map(p => [p.item.kind === 'task' ? p.item.task.id : '', p]));
+  assert.equal(byId.a.top, 4 / 16);
+  assert.equal(byId.a.height, 2 / 16);
+  assert.deepEqual([byId.a.lane, byId.a.lanes, byId.b.lane, byId.b.lanes], [0, 2, 1, 2]);
+  assert.deepEqual([byId.c.lane, byId.c.lanes], [0, 1]);
 });
