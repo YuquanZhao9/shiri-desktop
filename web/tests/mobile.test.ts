@@ -80,3 +80,15 @@ test('cloud push reminds 2 h, 1 h, 30 min and 10 min before, once each', () => {
   assert.match(fired[0][0].body, /2 小时后开始/);
   assert.equal(dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - 45 * 60_000).length, 0);
 });
+
+test('云端 21:00 日记推送：按用户时区到点、没写才推', async () => {
+  const { journalDue, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const nine = zt('2026-10-11', '21:00', 'Europe/Berlin');
+  const due = journalDue('Europe/Berlin', nine, () => false);
+  assert.equal(due?.occurrence, 'journal:2026-10-11:21:00');
+  assert.equal(due?.occurrence.split(':')[1], '2026-10-11');
+  assert.equal(journalDue('Europe/Berlin', nine, () => true), null);
+  assert.equal(journalDue('Europe/Berlin', nine - 60 * 60_000, () => false), null);
+  assert.equal(journalDue('Europe/Berlin', nine + 20 * 60_000, () => false), null);
+  assert.equal(nine, Date.parse('2026-10-11T19:00:00.000Z'));
+});

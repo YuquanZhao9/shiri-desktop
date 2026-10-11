@@ -14,3 +14,23 @@
 .ai-token-list small { display:block; color:var(--muted); font-size:11px; }
 .account-actions{display:flex;gap:8px;flex-wrap:wrap}.password-change{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:13px;padding:13px;border:1px solid #e7edf8;background:#f8fafe;border-radius:7px}.password-change>button,.password-change>p{grid-column:1/-1}.auth-link{grid-column:1/-1;justify-self:start;color:#6679d6;font-size:11px;padding:2px 0}.auth-link:hover{background:none;color:#4f64c7}.reset-offer{grid-column:1/-1;border:1px solid #d9def7;background:#f2f4fd;border-radius:7px;padding:12px}.reset-offer p{margin:0 0 10px!important;color:#6d789b!important}.reset-offer>div{display:flex;gap:8px}@media(max-width:680px){.password-change{grid-template-columns:1fr}.password-change>button,.password-change>p{grid-column:auto}}
 .calendar-event .event-star{flex:none;color:#e0a100}.row-star{color:#e0a100;margin-right:4px;vertical-align:-1px}
+
+/* 日记 */
+.journal-mark{display:inline-flex;align-items:center;flex:none;padding:0 4px;border-radius:3px;font-size:9px;line-height:15px;white-space:nowrap}
+.journal-mark.done{color:#fff;background:#3fa66b;font-weight:600}
+.journal-mark.done:hover{background:#358f5c}
+.journal-mark.pending{color:#8a93a6;background:#eceff4}
+.journal-mark.idle{color:#a9b1c3;background:#f1f3f7;visibility:hidden}
+.day-cell:hover .journal-mark.idle{visibility:visible}
+.journal-title{display:inline-flex;align-items:center;gap:6px}
+.journal-state{font-style:normal;font-size:9px;padding:0 5px;border-radius:3px;line-height:15px;color:#8a93a6;background:#eceff4}
+.journal-state.done{color:#fff;background:#3fa66b}
+.journal-count{font-size:9px;color:#b0b8c8;font-weight:400}
+.journal-editor{width:100%;min-height:130px;flex:0 1 auto;resize:vertical;border:1px solid #e8ecf4;border-radius:7px;background:#fffdf8;padding:10px 11px;font-size:12px;line-height:1.75;color:#5d6880;outline:none}
+.journal-editor:focus{border-color:#d9c3a3;outline:none;box-shadow:0 0 0 3px #f3e6d455}
+.journal-editor::placeholder{color:#bcc3d1}
+.journal-list .list-view-title .journal-today{margin-left:auto;padding:6px 10px}
+.journal-item{display:block;width:100%;text-align:left;padding:14px 4px;border-bottom:1px solid #f0f2f7;border-radius:0}
+.journal-item strong{font-size:12px;font-weight:550;color:#65708a}
+.journal-item p{margin:7px 0 0;font-size:12px;line-height:1.75;color:#7c869c;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+@media(max-width:680px){.journal-mark.idle{display:none}}

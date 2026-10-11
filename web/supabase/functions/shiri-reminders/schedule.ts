@@ -104,3 +104,14 @@ export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinute
   }
   return result.sort((a, b) => a.at - b.at);
 }
+
+/** 每天这个时间还没写日记就推送（与桌面版 src/journal.ts 的 JOURNAL_REMINDER_TIME 相同）。 */
+export const JOURNAL_TIME = '21:00';
+
+/** 用户所在时区今天 21:00 到点、且今天还没写日记时返回一条推送。 */
+export function journalDue(timeZone: string, now: number, written: (day: string) => boolean, lookbackMs = 10 * 60_000, aheadMs = 30_000): Due | null {
+  const today = zonedDateKey(now, timeZone);
+  const at = zonedTime(today, JOURNAL_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs || written(today)) return null;
+  return { occurrence: `journal:${today}:${JOURNAL_TIME}`, title: '该写今天的日记了', body: '今天的日记还没写，花几分钟记下今天吧', at };
+}

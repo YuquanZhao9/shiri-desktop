@@ -30,4 +30,4 @@ export function accountKey(url: string, userId: string): string {
   return `shiri-data:${encodeURIComponent(new URL(url).origin)}:${userId}`;
 }
 
-export { applyRemoteLists, planListSync, subscribeLive, syncLists, syncTimetable } from '@shared/live-sync';
+export { applyRemoteLists, planListSync, subscribeLive, syncJournal, syncLists, syncTimetable } from '@shared/live-sync';

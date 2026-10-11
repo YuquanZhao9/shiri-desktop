@@ -1,7 +1,8 @@
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import type { Task } from './types';
+import type { JournalEntry, Task } from './types';
+import { journalReminders } from './journal';
 import { addDays, dateKey, tasksForDate, isDone } from './core';
 
 export interface DesktopSettings { mode: 'window'|'desktop'|'fullscreen'; surface?: 'desktop'|'app'|'editor'; opacity: number; autostart: boolean; desktopAvailable: boolean; widgetSpan: 'week'|'twoWeeks'|'month'; widgetSide: 'left'|'right'; lastError?: string; }
@@ -74,11 +75,13 @@ export async function enableNotifications() {
 }
 let scheduleRevision=0;
 let pendingSchedule:Promise<void>=Promise.resolve();
-export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes:number|number[]=0):Promise<void> {
+/** journal 不为 null 时，加上每天 21:00 还没写日记的提醒。 */
+export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes:number|number[]=0,journal:JournalEntry[]|null=null):Promise<void> {
   const revision=++scheduleRevision;
   const next=pendingSchedule.catch(()=>{}).then(async()=>{
     if(revision!==scheduleRevision)return;
-    const queue=enabled?reminderQueue(tasks,30,Date.now(),leadMinutes):[];
+    const now=Date.now();
+    const queue=enabled?[...reminderQueue(tasks,30,now,leadMinutes),...(journal?journalReminders(journal,7,now):[])].sort((a,b)=>a.at-b.at):[];
     if(window.desktop) { const result=await window.desktop.syncReminders(queue); if(!result.ok) throw new Error(result.error); return; }
     if(isNative) {
       const pending=await LocalNotifications.getPending();

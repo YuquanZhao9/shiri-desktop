@@ -26,7 +26,7 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
 }
 
 /** 必须在用户点按时调用：iOS 只在手势里弹出通知授权。 */
-export async function enablePush(client: SupabaseClient, userId: string, leadMinutes: number): Promise<void> {
+export async function enablePush(client: SupabaseClient, userId: string, leadMinutes: number, journalReminder = true): Promise<void> {
   if (!pushSupported()) throw new Error(isStandalone() ? '这台设备的系统版本不支持网页提醒，需要 iOS 16.4 或更高。' : '请先用 Safari 的“添加到主屏幕”，再从主屏幕图标打开昱时开启提醒。');
   if (!VAPID_PUBLIC_KEY) throw new Error('提醒服务还没配置（缺少 VAPID 公钥）。');
   const permission = await Notification.requestPermission();
@@ -34,10 +34,10 @@ export async function enablePush(client: SupabaseClient, userId: string, leadMin
   const registration = await navigator.serviceWorker.ready;
   let subscription = await registration.pushManager.getSubscription();
   if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_PUBLIC_KEY) });
-  await saveSubscription(client, userId, subscription, leadMinutes);
+  await saveSubscription(client, userId, subscription, leadMinutes, journalReminder);
 }
 
-export async function saveSubscription(client: SupabaseClient, userId: string, subscription: PushSubscription, leadMinutes: number): Promise<void> {
+export async function saveSubscription(client: SupabaseClient, userId: string, subscription: PushSubscription, leadMinutes: number, journalReminder = true): Promise<void> {
   const json = subscription.toJSON();
   if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) throw new Error('推送订阅信息不完整，请关闭后重新开启提醒。');
   const { error } = await client.from('shiri_push_subscriptions').upsert({
@@ -47,6 +47,7 @@ export async function saveSubscription(client: SupabaseClient, userId: string, s
     auth: json.keys.auth,
     time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
     lead_minutes: leadMinutes,
+    journal_reminder: journalReminder,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'endpoint' });
   if (error) throw new Error(/shiri_push_subscriptions|schema cache/i.test(error.message) ? '云端提醒表还没建，请先运行 supabase/schema-v2.sql。' : error.message);

@@ -78,10 +78,19 @@ export interface Timetable {
   updatedAt: string;
 }
 
+/** One diary page per day, plain text. An empty text marks a deleted entry so the deletion syncs. */
+export interface JournalEntry {
+  date: string;
+  text: string;
+  updatedAt: string;
+}
+
 export interface AppData {
   version: 1;
   tasks: Task[];
   lists: TaskList[];
   /** Weekly class timetable; absent until the user saves one (a default is shown). */
   timetable?: Timetable;
+  /** Diary pages; absent until the first one is written. */
+  journal?: JournalEntry[];
 }

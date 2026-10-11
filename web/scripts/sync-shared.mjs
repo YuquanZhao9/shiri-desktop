@@ -2,7 +2,7 @@
 // 部署云函数前运行：node scripts/sync-shared.mjs；tests/ai-sync.test.ts 会检查两边一致。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
-export const SHARED = ['types.ts', 'core.ts', 'timetable.ts', 'holidays.ts'];
+export const SHARED = ['types.ts', 'core.ts', 'timetable.ts', 'holidays.ts', 'journal.ts'];
 const from = new URL('../../src/', import.meta.url);
 const to = new URL('../supabase/functions/_shared/', import.meta.url);
 

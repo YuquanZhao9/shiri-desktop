@@ -269,3 +269,23 @@ svg { flex-shrink: 0; }
 .cell.outside .cell-hours { opacity: .35; }
 .dots.untimed { flex: 0 0 auto; margin-top: 2px; }
 .dots.untimed i { width: 4px; height: 4px; }
+
+/* 日记 */
+.tabbar { grid-template-columns: repeat(5, 1fr); }
+.diary-badge { position: absolute; top: -1px; left: 2px; font-size: 8.5px; line-height: 12px; padding: 0 2px; border-radius: 3px; color: #fff; background: #3fa66b; font-weight: 600; white-space: nowrap; letter-spacing: -.3px; }
+.diary-card { display: block; width: 100%; text-align: left; margin: 14px 0 6px; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--line); background: var(--card); color: var(--ink); }
+.diary-card.done { border: 1px solid color-mix(in srgb, #3fa66b 35%, var(--card)); background: color-mix(in srgb, #3fa66b 8%, var(--card)); }
+.diary-card-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.diary-card-head em { font-style: normal; font-size: 11px; font-weight: 600; margin-left: auto; padding: 1px 7px; border-radius: 6px; color: var(--muted); background: var(--bg); }
+.diary-card.done .diary-card-head em { color: #fff; background: #3fa66b; }
+.diary-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diary-preview.muted { color: var(--muted); }
+.diary-item { display: block; width: 100%; text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--line); color: var(--ink); }
+.diary-item b { display: flex; align-items: baseline; gap: 8px; font-size: 15px; }
+.diary-item b small { font-weight: 400; font-size: 11px; color: var(--muted); }
+.diary-item span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.journal-page .top { display: flex; align-items: center; justify-content: space-between; }
+.journal-sheet { display: flex; flex-direction: column; height: min(88dvh, 720px); }
+.journal-date { font-weight: 600; font-size: 15px; color: var(--ink); }
+.journal-text { flex: 1; width: 100%; border: 0; outline: none; resize: none; padding: 14px 16px; font-size: 16px; line-height: 1.75; color: var(--ink); background: var(--card); border-radius: 12px; }
+.journal-foot { margin: 8px 4px 0; font-size: 11px; color: var(--muted); }

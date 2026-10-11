@@ -167,14 +167,26 @@ let application;
   assert.equal(bounds.grid.bottom, bounds.viewport.height);
   assert.equal(bounds.grid.stripTop, null, 'classes live inside the date cells, not in a bottom strip');
   // Semester weeks show each weekday's classes by period inside the date cell.
-  await page.getByRole('button', { name: '下一段' }).click();
-  await page.waitForSelector('[data-date="2026-10-12"] .cell-classes', { state: 'attached' });
-  const mondayClasses = await page.evaluate(() => [...document.querySelectorAll('[data-date="2026-10-12"] .class-period')].map(row => ({ empty: row.classList.contains('empty'), chips: [...row.querySelectorAll('.class-chip')].map(chip => chip.textContent) })));
-  assert.equal(mondayClasses.length, 5);
-  assert.deepEqual(mondayClasses[0].chips, ['AR 讲课', 'MC 讲课']);
-  assert.equal(mondayClasses[1].empty, true);
-  assert.equal(await page.locator('[data-date="2026-10-16"] .cell-classes').count(), 0, 'no classes on Friday');
-  assert.equal(await page.locator('[data-date="2026-10-11"] .cell-classes').count(), 0, 'nothing before the semester');
+  // Move to the fortnight that contains 2026-10-12 (the first semester week).
+  for (let step = 0; step < 30 && !(await page.locator('[data-date="2026-10-12"]').count()); step++) await page.getByRole('button', { name: (await page.locator('[data-date]').first().getAttribute('data-date')) < '2026-10-12' ? '下一段' : '上一段' }).click();
+  // Classes sit in the cell timeline with the other events, tagged 课.
+  await page.waitForSelector('[data-date="2026-10-12"] .class-event', { state: 'attached' });
+  const mondayClasses = await page.evaluate(() => [...document.querySelectorAll('[data-date="2026-10-12"] .class-event')].map(item => item.querySelector('span')?.textContent));
+  assert.ok(mondayClasses.includes('AR 讲课') && mondayClasses.includes('MC 讲课'), `Monday classes: ${mondayClasses}`);
+  assert.equal(await page.locator('[data-date="2026-10-16"] .class-event').count(), 0, 'no classes on Friday');
+  assert.equal(await page.locator('[data-date="2026-10-11"] .class-event').count(), 0, 'nothing before the semester');
+  // Diary status: a written day shows a green 日记✓ on the desktop calendar (never the text itself).
+  assert.equal(await page.locator('[data-date="2026-10-12"] .journal-mark.done').count(), 0);
+  await page.evaluate(() => {
+    const raw = localStorage.getItem('shiri-data:local');
+    const data = JSON.parse(raw);
+    data.journal = [{ date: '2026-10-12', text: 'smoke diary', updatedAt: new Date().toISOString() }];
+    localStorage.setItem('shiri-data:local', JSON.stringify(data));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'shiri-data:local', newValue: JSON.stringify(data), storageArea: localStorage }));
+  });
+  await page.waitForSelector('[data-date="2026-10-12"] .journal-mark.done', { state: 'attached' });
+  assert.equal(await page.locator('[data-date="2026-10-12"] .journal-mark.done').textContent(), '日记✓');
+  assert.equal(await page.locator('[data-date="2026-10-12"]').evaluate(cell => cell.textContent.includes('smoke diary')), false, 'diary text stays off the desktop');
   await application.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith('#desktop'));
     window.setMinimumSize(560, 240);

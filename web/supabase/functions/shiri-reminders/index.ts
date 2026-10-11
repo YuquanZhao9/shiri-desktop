@@ -4,7 +4,7 @@
 // SUPABASE_SERVICE_ROLE_KEY 由 Supabase 自动提供）。
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import webpush from 'npm:web-push@3.6.7';
-import { dueReminders, MULTI_LEADS, type ReminderTask } from './schedule.ts';
+import { dueReminders, journalDue, MULTI_LEADS, zonedDateKey, type ReminderTask } from './schedule.ts';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -16,7 +16,7 @@ const env = (name: string) => {
 webpush.setVapidDetails('https://yuquanzhao9.github.io/yushi-app/', env('VAPID_PUBLIC_KEY'), env('VAPID_PRIVATE_KEY'));
 const admin = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
 
-interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number }
+interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean }
 
 function sameSecret(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -28,7 +28,7 @@ function sameSecret(a: string, b: string): boolean {
 Deno.serve(async request => {
   if (!sameSecret(request.headers.get('x-cron-secret') ?? '', env('CRON_SECRET'))) return new Response('forbidden', { status: 403 });
 
-  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes');
+  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder');
   if (error) return new Response(error.message, { status: 500 });
 
   const now = Date.now();
@@ -40,6 +40,19 @@ Deno.serve(async request => {
     tasksByUser.set(userId, (data || []).map((row: { payload: ReminderTask }) => row.payload));
   }
 
+  // 当天有没有写日记：只在某台设备到了 21:00 时才去查，并按账号 + 日期缓存。
+  const writtenCache = new Map<string, boolean>();
+  async function written(userId: string, day: string): Promise<boolean> {
+    const key = `${userId}:${day}`;
+    if (!writtenCache.has(key)) {
+      const { data, error: journalError } = await admin.from('shiri_journal').select('payload').eq('user_id', userId).eq('day', day).maybeSingle();
+      // 读不到就当作写了，宁可漏提醒也不乱提醒。
+      const text = (data as { payload?: { text?: unknown } } | null)?.payload?.text;
+      writtenCache.set(key, !!journalError || (typeof text === 'string' && text.trim().length > 0));
+    }
+    return writtenCache.get(key)!;
+  }
+
   let sent = 0;
   // 失败原因写进响应（pg_net 会保存在 net._http_response），方便排查推送没到的问题。
   const failures: { occurrence: string; status?: number; reason: string }[] = [];
@@ -47,6 +60,11 @@ Deno.serve(async request => {
     let due;
     try { due = dueReminders(tasksByUser.get(sub.user_id) ?? [], sub.time_zone, MULTI_LEADS, now); }
     catch { continue; } // 无效时区：跳过这台设备，不影响其他人
+    if (sub.journal_reminder !== false) {
+      // 先看是否到点，到点了才查当天日记。
+      const diary = journalDue(sub.time_zone, now, () => false);
+      if (diary && !(await written(sub.user_id, zonedDateKey(now, sub.time_zone)))) due.push(diary);
+    }
     for (const item of due) {
       // 先占位再发送：并发或重跑时同一提醒只发一次。
       const { error: claimError } = await admin.from('shiri_push_sent').insert({ endpoint: sub.endpoint, occurrence: item.occurrence });

@@ -1,6 +1,7 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import type { TaskList, Timetable } from './types';
+import type { JournalEntry, TaskList, Timetable } from './types';
 import { validateTimetable } from './timetable';
+import { mergeJournal, newerEntry, validateJournalEntry } from './journal';
 
 // 清单、课表同步与实时推送，电脑版和 iPhone 网页版共用。
 // 云端需先运行 cloud/schema-v2.sql、schema-v3.sql；没运行时对应部分自动跳过，日程同步不受影响。
@@ -79,12 +80,40 @@ export async function syncTimetable(client: SupabaseClient, userId: string, loca
   return remote ?? local;
 }
 
+/**
+ * 日记同步：云端每天一行，较新的 updatedAt 为准（同 src/journal.ts newerEntry）。
+ * 只上传本机比云端新的；返回本机与云端合并后的日记，调用方再用 mergeJournal 并入同步期间的新改动。
+ * 云端没建日记表（schema-v5.sql）或读取失败时返回 null，本机保持不变。
+ */
+export async function syncJournal(client: SupabaseClient, userId: string, local: JournalEntry[] = []): Promise<JournalEntry[] | null> {
+  const remote: JournalEntry[] = [];
+  for (let start = 0; ; start += 500) {
+    const { data, error } = await client.from('shiri_journal').select('payload').eq('user_id', userId).order('day').range(start, start + 499);
+    if (error) return null;
+    for (const row of (data || []) as { payload: unknown }[]) { try { remote.push(validateJournalEntry(row.payload)); } catch { /* 跳过损坏的一行 */ } }
+    if (!data || data.length < 500) break;
+  }
+  const push = journalToPush(local, remote);
+  for (let start = 0; start < push.length; start += 200) {
+    const { error } = await client.rpc('merge_journal', { incoming: push.slice(start, start + 200), expected_user: userId });
+    if (error) return null;
+  }
+  return mergeJournal(local, remote);
+}
+
+/** 本机比云端新的日记（云端没有的也算）。 */
+export function journalToPush(local: JournalEntry[], remote: JournalEntry[]): JournalEntry[] {
+  const remoteByDate = new Map(remote.map(entry => [entry.date, entry]));
+  return local.filter(entry => { const other = remoteByDate.get(entry.date); return !other || newerEntry(entry, other) === entry && JSON.stringify(entry) !== JSON.stringify(other); });
+}
+
 /** 另一台设备改了日程或清单时立即通知；手机从后台回来时由调用方再补一次同步。 */
 export function subscribeLive(client: SupabaseClient, userId: string, onChange: () => void): () => void {
   const channel: RealtimeChannel = client.channel(`shiri-live-${userId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_tasks', filter: `user_id=eq.${userId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_lists', filter: `user_id=eq.${userId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_timetable', filter: `user_id=eq.${userId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_journal', filter: `user_id=eq.${userId}` }, onChange)
     .subscribe();
   return () => { void client.removeChannel(channel); };
 }

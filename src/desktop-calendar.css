@@ -217,3 +217,11 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .day-cell .cell-hours > .calendar-event.bar { padding:0; }
 .day-cell .cell-hours > .calendar-event.bar > * { display:none; }
 .day-cell .cell-hours > .calendar-event.bar { min-height:3px; background:color-mix(in srgb, var(--event-color) 80%, transparent); }
+
+/* 日记状态：写了是绿色“日记✓”，今天没写是灰色“日记”，其他日子鼠标移上去才出现 */
+.desktop-calendar .journal-mark { font-size:10px; }
+.desktop-calendar .journal-mark.pending, .desktop-calendar .journal-mark.idle { color:#e8eef8; background:#ffffff26; }
+.desktop-calendar .journal-mark.done { color:#fff; background:#2f9e5f; }
+.desktop-calendar .cell-top .journal-mark { margin-right:26px; }
+.desktop-calendar .cell-top .day-mark, .desktop-calendar .cell-top .de-holiday { margin-right:0; }
+.desktop-calendar .cell-top .day-mark + .de-holiday { margin-left:0; }
