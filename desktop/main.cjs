@@ -44,6 +44,7 @@ const CELL_EDITOR_EXPANDED_HEIGHT = 382;
 let mainWindow = null;
 let desktopWindow = null;
 const editorWindows = new Set();
+let journalWindow = null;
 // One focusable cell editor is created in advance and reused, so a double-click
 // only moves and reveals it instead of starting a new renderer each time.
 let cellEditorWindow = null;
@@ -488,6 +489,43 @@ async function openEditor(request) {
   }
 }
 
+// 专属日记窗口：只开一个，再次打开别的日期时切换过去（页面里会先保存当前那天）。
+async function openJournalWindow(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日记日期无效。');
+  if (journalWindow && !journalWindow.isDestroyed()) {
+    journalWindow.webContents.send('desktop:journal-open', date);
+    if (journalWindow.isMinimized()) journalWindow.restore();
+    if (!smokeTest) { setCalendarInteractive(false); journalWindow.show(); journalWindow.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  }
+  const journal = new BrowserWindow({
+    title: '昱时 · 日记',
+    width: 880, height: 720, minWidth: 520, minHeight: 440, backgroundColor: '#f5efe4',
+    show: false, autoHideMenuBar: true, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  journalWindow = journal;
+  editorWindows.add(journal);
+  journal.on('closed', () => { editorWindows.delete(journal); if (journalWindow === journal) journalWindow = null; });
+  secureContents(journal);
+  try {
+    await loadSurface(journal, `journal?date=${date}`);
+    if (!smokeTest) {
+      setCalendarInteractive(false);
+      journal.show();
+      journal.focus();
+    }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    journal.destroy();
+    throw error;
+  }
+}
+
 function showNotification(value) {
   const options = validateNotification(value);
   if (smokeTest) return { ok: false, error: '隐藏测试环境禁止显示系统通知。' };
@@ -633,6 +671,7 @@ function registerIpc() {
     }
   });
   handle('desktop:open-editor', (request) => openEditor(request));
+  handle('desktop:open-journal', (date) => openJournalWindow(date));
   ipcMain.handle('desktop:open-inline-editor', async (event, request) => {
     const testSurface = smokeTest && event.sender === mainWindow?.webContents && event.sender.getURL().endsWith('#desktop');
     if (!isTrustedFrame(event) || (event.sender !== desktopWindow?.webContents && !testSurface))

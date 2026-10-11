@@ -285,7 +285,18 @@ svg { flex-shrink: 0; }
 .diary-item b small { font-weight: 400; font-size: 11px; color: var(--muted); }
 .diary-item span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .journal-page .top { display: flex; align-items: center; justify-content: space-between; }
-.journal-sheet { display: flex; flex-direction: column; height: min(88dvh, 720px); }
-.journal-date { font-weight: 600; font-size: 15px; color: var(--ink); }
-.journal-text { flex: 1; width: 100%; border: 0; outline: none; resize: none; padding: 14px 16px; font-size: 16px; line-height: 1.75; color: var(--ink); background: var(--card); border-radius: 12px; }
-.journal-foot { margin: 8px 4px 0; font-size: 11px; color: var(--muted); }
+.journal-sheet { display: flex; flex-direction: column; height: min(90dvh, 760px); --paper: #fffdf8; --pink: #f0cfc4; --rule: #efe6d6; --warm: #c08a4a; background: linear-gradient(180deg, #f6f0e5, #efe7d8); }
+.journal-sheet .sheet-bar { background: transparent; }
+.journal-head { display: flex; align-items: center; gap: 14px; padding: 2px 4px 14px; }
+.journal-day { font-family: Georgia, "Times New Roman", serif; font-size: 46px; line-height: .9; color: var(--warm); min-width: 50px; text-align: center; }
+.journal-head b { display: block; font-size: 15px; color: #4d473d; }
+.journal-head small { display: block; margin-top: 5px; font-size: 12px; color: #8c8273; }
+.journal-text { flex: 1; width: 100%; border: 1px solid #eadfcb; outline: none; resize: none; padding: 16px 16px 16px 40px; font-family: "Songti SC", "STSong", "Noto Serif SC", serif; font-size: 17px; line-height: 32px; color: #3e3a33; border-radius: 14px; background-color: var(--paper); background-image: linear-gradient(to right, transparent 26px, var(--pink) 26px, var(--pink) 27px, transparent 27px), repeating-linear-gradient(to bottom, transparent 0, transparent 31px, var(--rule) 31px, var(--rule) 32px); background-attachment: local; background-position: 0 0, 0 16px; box-shadow: 0 14px 30px -20px #6b512f66; }
+.journal-text::placeholder { color: #c0b5a3; }
+.journal-foot { margin: 10px 4px 0; font-size: 11px; color: #8c8273; }
+@media (prefers-color-scheme: dark) {
+  .journal-sheet { --paper: #23211d; --pink: #4a3430; --rule: #2f2c26; background: linear-gradient(180deg, #1c1a17, #171512); }
+  .journal-head b { color: #e9e2d4; }
+  .journal-text { color: #ece5d6; border-color: #38332b; }
+  .journal-text::placeholder { color: #6f6656; }
+}

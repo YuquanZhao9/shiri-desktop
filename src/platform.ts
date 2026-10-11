@@ -26,6 +26,8 @@ declare global { interface Window { desktop?: {
   onCellEditorOpen(cb:(request:CellEditorRequest)=>void):()=>void;
   onCellEditorBlur(cb:()=>void):()=>void;
   onPointerReset(cb:()=>void):()=>void;
+  openJournalWindow?(date:string):Promise<{ok:boolean;error?:string}>;
+  onJournalOpen?(cb:(date:string)=>void):()=>void;
 } } }
 export const isNative = Capacitor.isNativePlatform();
 const pendingWrites = new Map<string, Promise<void>>();

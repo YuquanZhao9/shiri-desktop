@@ -34,3 +34,31 @@
 .journal-item strong{font-size:12px;font-weight:550;color:#65708a}
 .journal-item p{margin:7px 0 0;font-size:12px;line-height:1.75;color:#7c869c;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 @media(max-width:680px){.journal-mark.idle{display:none}}
+/* 专属日记窗口 */
+.journal-surface,.journal-surface body{height:100%;background:#f3ede2}
+.journal-tools{display:inline-flex;align-items:center;gap:4px}
+.journal-tools .icon-button{width:22px;height:22px}
+.journal-window{--paper:#fffdf8;--ink:#3e3a33;--soft:#8c8273;--line-color:#efe6d6;--accent-warm:#c08a4a;height:100dvh;display:flex;flex-direction:column;background:radial-gradient(1200px 500px at 10% -10%,#fbf3e4 0,transparent 60%),linear-gradient(180deg,#f6f0e5,#efe7d8);color:var(--ink);padding:26px 30px 18px;gap:18px;font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
+.jw-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.jw-date{display:flex;align-items:center;gap:16px}
+.jw-day{font-family:Georgia,"Times New Roman",serif;font-size:58px;line-height:.9;color:var(--accent-warm);font-weight:400;letter-spacing:-2px;min-width:64px;text-align:center}
+.jw-date strong{display:block;font-size:16px;font-weight:600;color:#4d473d;letter-spacing:.5px}
+.jw-date small{display:block;margin-top:7px;font-size:12px;color:var(--soft)}
+.jw-nav{display:flex;align-items:center;gap:6px}
+.jw-nav button{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 10px;border-radius:17px;color:#7d6f5c;background:#ffffffa8;border:1px solid #e6dccb;font-size:12px}
+.jw-nav button:hover{background:#fff}
+.jw-body{flex:1;min-height:0;display:flex;gap:18px}
+.jw-paper{flex:1;min-width:0;display:flex;background:var(--paper);border:1px solid #eadfcb;border-radius:14px;box-shadow:0 1px 0 #fff inset,0 18px 40px -22px #6b512f55,0 2px 6px #6b512f14;position:relative;overflow:hidden}
+.jw-paper::before{content:"";position:absolute;left:46px;top:0;bottom:0;width:1px;background:#f0cfc4}
+.jw-text{flex:1;width:100%;border:0;outline:none;resize:none;background:transparent;padding:22px 30px 22px 66px;font-family:"LXGW WenKai","Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun",serif;font-size:17px;line-height:34px;color:var(--ink);background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 33px,var(--line-color) 33px,var(--line-color) 34px);background-attachment:local;background-position:0 22px}
+.jw-text:focus{outline:none}
+.jw-text::placeholder{color:#c0b5a3}
+.jw-loading{margin:auto;color:var(--soft)}
+.jw-side{width:200px;flex:none;overflow:auto;padding:16px 14px;border-radius:14px;background:#ffffff80;border:1px solid #e8dfcf}
+.jw-side h3{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--soft);letter-spacing:1px}
+.jw-task{display:flex;align-items:flex-start;gap:8px;padding:7px 0;font-size:12px;color:#5d5548;border-bottom:1px dashed #eadfcb}
+.jw-task i{width:6px;height:6px;border-radius:50%;margin-top:5px;flex:none}
+.jw-task small{color:var(--soft);margin-right:6px}
+.jw-task.done span{text-decoration:line-through;opacity:.55}
+.jw-foot{display:flex;justify-content:space-between;font-size:11px;color:var(--soft);padding:0 4px}
+@media(max-width:640px){.jw-side{display:none}.journal-window{padding:18px 16px 12px}}

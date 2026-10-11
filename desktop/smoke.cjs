@@ -18,6 +18,8 @@ let application;
 
 (async () => {
   fs.mkdirSync(work, { recursive: true });
+  // Start from an empty test profile so earlier runs cannot leave events or diaries behind.
+  fs.rmSync(path.join(work, 'desktop-smoke-profile'), { recursive: true, force: true });
   application = await _electron.launch({ executablePath, args: [project, '--disable-gpu'], env: environment, timeout: 30_000 });
   const page = await application.firstWindow();
   page.on('pageerror', (error) => errors.push(error.message));
@@ -54,7 +56,7 @@ let application;
   assert.equal(renderer.invalidQueue.ok, false);
   assert.equal(renderer.require, 'undefined');
   assert.equal(renderer.nodeProcess, 'undefined');
-  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onModeChanged', 'onPointerReset', 'openEditor', 'openInlineEditor', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
+  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onJournalOpen', 'onModeChanged', 'onPointerReset', 'openEditor', 'openInlineEditor', 'openJournalWindow', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
   await page.getByRole('button', { name: '时间表', exact: true }).click();
   await page.waitForSelector('.timeline', { state: 'attached' });
   await page.getByRole('button', { name: '月历', exact: true }).click();
@@ -187,6 +189,17 @@ let application;
   await page.waitForSelector('[data-date="2026-10-12"] .journal-mark.done', { state: 'attached' });
   assert.equal(await page.locator('[data-date="2026-10-12"] .journal-mark.done').textContent(), '日记✓');
   assert.equal(await page.locator('[data-date="2026-10-12"]').evaluate(cell => cell.textContent.includes('smoke diary')), false, 'diary text stays off the desktop');
+  // Double-clicking the diary mark opens the dedicated diary window; what is typed there is saved.
+  const journalPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#journal'), timeout: 15000 });
+  await page.locator('[data-date="2026-10-12"] .journal-mark').dblclick();
+  const journalPage = await journalPagePromise;
+  await journalPage.waitForSelector('.jw-text');
+  assert.equal(await journalPage.locator('.jw-text').inputValue(), 'smoke diary');
+  await journalPage.locator('.jw-text').press('End');
+  await journalPage.locator('.jw-text').type(' plus');
+  await journalPage.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
+  await journalPage.close();
   await application.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith('#desktop'));
     window.setMinimumSize(560, 240);

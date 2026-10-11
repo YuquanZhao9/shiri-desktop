@@ -46,6 +46,12 @@ function App() {
     return { taskId: params.get('taskId') || '', date: params.get('date') || '', time: params.get('time') || '' };
   });
   const editorSurface = editorIntent !== null || cellEditorSurface;
+  // 专属日记窗口（#journal?date=…），桌面日历上双击日记标记打开。
+  const [journalSurface] = useState(() => window.location.hash.startsWith('#journal'));
+  const [journalDate,setJournalDate]=useState(()=>{const match=/date=(\d{4}-\d{2}-\d{2})/.exec(window.location.hash);try{return match?(parseDate(match[1]),match[1]):todayKey();}catch{return todayKey();}});
+  const [journalCount,setJournalCount]=useState(0);
+  const [journalSaved,setJournalSaved]=useState('');
+  const journalFlush=useRef<()=>void>(()=>{});
   const [previewSpan,setPreviewSpan] = useState<DesktopSettings['widgetSpan']>('twoWeeks');
   const [today,setToday]=useState(todayKey);
   const [selected,setSelected]=useState(todayKey);
@@ -79,6 +85,7 @@ function App() {
   const skipCalendarClick=useRef(false);
   const desktopClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const eventClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const journalClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const [quick,setQuick]=useState('');
   const [reminders,setReminders]=useState(()=>getPref('shiri-reminders',window.desktop?'true':'false')==='true');
   const [reminderLead,setReminderLead]=useState(reminderLeadPref);
@@ -112,7 +119,7 @@ function App() {
   const canEdit=()=>readyRef.current&&loadedKeyRef.current===keyRef.current;
   const toast=useCallback((text:string)=>setMessage(text),[]);
 
-  useEffect(()=>{document.documentElement.classList.toggle('desktop-surface',desktopSurface);document.documentElement.classList.toggle('widget-preview',desktopSurface&&!window.desktop);document.documentElement.classList.toggle('editor-surface',editorSurface);return()=>{document.documentElement.classList.remove('desktop-surface','widget-preview','editor-surface');};},[desktopSurface,editorSurface]);
+  useEffect(()=>{document.documentElement.classList.toggle('desktop-surface',desktopSurface);document.documentElement.classList.toggle('widget-preview',desktopSurface&&!window.desktop);document.documentElement.classList.toggle('editor-surface',editorSurface);document.documentElement.classList.toggle('journal-surface',journalSurface);return()=>{document.documentElement.classList.remove('desktop-surface','widget-preview','editor-surface','journal-surface');};},[desktopSurface,editorSurface,journalSurface]);
   useEffect(()=>{
     const receive=(event:StorageEvent)=>{
       if(event.storageArea!==localStorage)return;
@@ -135,6 +142,7 @@ function App() {
   },[toast]);
 
   useEffect(()=>{const t=setInterval(()=>setToday(todayKey()),30000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{if(!journalSurface)return;document.title='昱时 · 日记';const off=window.desktop?.onJournalOpen?.(date=>{try{parseDate(date);journalFlush.current();setJournalDate(date);}catch{/* ignore */}});const leave=()=>journalFlush.current();window.addEventListener('pagehide',leave);window.addEventListener('beforeunload',leave);return()=>{off?.();window.removeEventListener('pagehide',leave);window.removeEventListener('beforeunload',leave);};},[journalSurface]);
   // 管理窗口刚打开时，接上桌面日历点开日记的请求。
   useEffect(()=>{if(window.location.hash)return;try{const raw=localStorage.getItem(OPEN_JOURNAL_KEY);if(raw)openJournalRequest(raw);}catch{/* ignore */}},[]);
   
@@ -304,6 +312,14 @@ function App() {
   function saveTimetable(next:Timetable){if(!canEdit()){toast('数据还未载入，暂时无法编辑');return;}const candidate={...next,updatedAt:stamp()};try{validateTimetable(candidate);}catch(e){toast((e as Error).message);return;}setData(prev=>({...prev,timetable:candidate}));}
   function updateSlot(id:string,patch:Partial<TimetableSlot>){saveTimetable({...timetable,slots:timetable.slots.map(slot=>slot.id===id?{...slot,...patch}:slot)});}
   function saveJournal(date:string,text:string){if(!canEdit()){toast('数据还未载入，日记暂时无法保存');return;}setData(prev=>{const journal=writeJournal(prev.journal,date,text);return journal===prev.journal||(!prev.journal&&!journal.length)?prev:{...prev,journal};});}
+  function saveJournalNow(date:string,text:string){
+    if(!canEdit())return;
+    // 先直接写进本机存储（关窗口时 React 来不及再渲染），再更新界面。
+    try{const raw=localStorage.getItem(keyRef.current);if(raw){const stored=validateBackup(JSON.parse(raw));const journal=writeJournal(stored.journal,date,text);if(journal!==stored.journal)localStorage.setItem(keyRef.current,JSON.stringify({...stored,journal}));}}catch{/* 下面的正常保存兜底 */}
+    saveJournal(date,text);setJournalSaved(new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+  }
+  // 打开专属日记窗口；浏览器预览里没有桌面服务时退回右栏。
+  function openJournalWindow(date:string){if(window.desktop?.openJournalWindow){void window.desktop.openJournalWindow(date).then(result=>{if(!result.ok)toast(result.error||'日记窗口打不开');});return;}openJournal(date);}
   function openJournalRequest(raw:string){try{const {date,at}=JSON.parse(raw) as {date:string;at:number};if(Date.now()-at>15000)return;parseDate(date);setSelected(date);setMonth(parseDate(date));setSection('calendar');setPanel(true);setMobileMenu(false);setJournalFocus(n=>n+1);}catch{/* ignore */}}
   // 桌面日历上只显示是否写了，日记内容在管理窗口里看和写。
   function openJournal(date:string){if(desktopSurface&&window.desktop){try{localStorage.setItem(OPEN_JOURNAL_KEY,JSON.stringify({date,at:Date.now()}));}catch{/* ignore */}void window.desktop.showWindow();return;}selectDate(date);setSection('calendar');setPanel(true);setJournalFocus(n=>n+1);}
@@ -420,6 +436,25 @@ function App() {
     {cellExpanded&&<><div className="inline-editor-fields"><label>日期<input type="date" aria-label="日期" value={edit.date} onChange={e=>setEdit({...edit,date:e.target.value})}/></label><label>时长<select aria-label="持续时长" disabled={!edit.time} value={edit.duration} onChange={e=>setEdit({...edit,duration:Number(e.target.value)})}>{[15,30,45,60,90,120,180,240,480].map(n=><option key={n} value={n}>{n<60?`${n} 分钟`:`${n/60} 小时`}</option>)}</select></label><label>重复<select aria-label="重复" value={edit.repeat} onChange={e=>setEdit({...edit,repeat:e.target.value as Task['repeat']})}>{Object.entries(REPEATS).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select></label><label>清单<select aria-label="所属清单" value={edit.listId} onChange={e=>setEdit({...edit,listId:e.target.value})}>{data.lists.map(list=><option key={list.id} value={list.id}>{list.name}</option>)}</select></label></div></>}
   </form>;
 
+  if(journalSurface){
+    const day=parseDate(journalDate);
+    const tasks=tasksForDate(activeTasks,journalDate);
+    const festival=festivalName(journalDate);
+    const weekday=day.toLocaleDateString('zh-CN',{weekday:'long'});
+    const go=(next:string)=>{journalFlush.current();setJournalDate(next);};
+    return <div className="journal-window">
+      <header className="jw-head">
+        <div className="jw-date"><span className="jw-day">{day.getDate()}</span><div><strong>{day.getFullYear()} 年 {day.getMonth()+1} 月 · {weekday}</strong><small>{festival||`农历${formatLunar(journalDate)}`}{journalDate===today?' · 今天':''}</small></div></div>
+        <div className="jw-nav"><button aria-label="前一天" title="前一天" onClick={()=>go(addDays(journalDate,-1))}><ChevronLeft size={18}/></button>{journalDate!==today&&<button className="jw-today" onClick={()=>go(today)}>今天</button>}<button aria-label="后一天" title="后一天" onClick={()=>go(addDays(journalDate,1))}><ChevronRight size={18}/></button></div>
+      </header>
+      <div className="jw-body">
+        <div className="jw-paper">{ready&&loadedKey===storageKey?<JournalEditor key={`${storageKey}:${journalDate}`} date={journalDate} text={journalText(data.journal,journalDate)} focus={1} onSave={saveJournalNow} onCount={setJournalCount} flushRef={journalFlush} className="jw-text" placeholder={'今天过得怎么样？\n\n写下发生的事、心情，或者一句想对自己说的话。'}/>:<p className="jw-loading">正在打开日记本…</p>}</div>
+        {tasks.length>0&&<aside className="jw-side"><h3>这一天</h3>{tasks.map(task=><div key={task.id} className={`jw-task ${isDone(task,journalDate)?'done':''}`}><i style={{background:task.color||listOf(task.listId)?.color}}/><span>{task.time&&<small>{task.time}</small>}{task.title}</span></div>)}</aside>}
+      </div>
+      <footer className="jw-foot"><span>{journalCount?`${journalCount} 字`:'空白的日记不会保存'}</span><span>{journalSaved?`已自动保存 · ${journalSaved}`:'边写边自动保存 · 只有你能看到'}</span></footer>
+    </div>;
+  }
+
   return <div className={`app ${!panel?'panel-hidden':''} ${mobileMenu?'menu-open':''} ${desktopSurface?'desktop-calendar':''}  ${editorSurface&&!cellEditorSurface?'editor-only':''} ${cellEditorSurface?'cell-editor-surface':''}`} data-span={desktopSurface?widgetSpan:undefined}>
     {!desktopSurface&&!cellEditorSurface&&<aside className="sidebar">
       <a className="brand" href="#" onClick={e=>{e.preventDefault();goToday();}}><img src="./icon.svg" alt=""/><span>昱时<small>让每一天，有条不紊</small></span></a>
@@ -448,7 +483,7 @@ function App() {
       {section==='journal'?<JournalList journal={data.journal} today={today} onOpen={date=>openJournal(date)}/>
       :isList?<div className="list-view"><div className="list-view-title"><h2>{section==='inbox'?'还没有日期的事':'全部日程'}</h2><span>{listed.length} 项</span></div><form className="inline-add" onSubmit={quickAdd}><Plus size={18}/><input aria-label="快速添加任务" placeholder={section==='inbox'?'记下一个待办，按 Enter 保存':'添加到选中的日期，按 Enter 保存'} value={quick} onChange={e=>setQuick(e.target.value)}/><button type="submit">添加</button></form>{listed.map(task=><div className="list-item" key={task.id}>{taskRow(task,task.date||selected)}<span className="list-date">{task.date||'未安排'}{task.repeat!=='none'&&' 起 · 重复'}</span></div>)}{!listed.length&&<div className="empty-state"><Inbox size={34}/><h3>{query?'没有找到相关日程':'先把想做的事，记下来'}</h3><p>{query?'换一个关键词再试试。':'你可以稍后再安排日期和时间。'}</p></div>}</div>
       :view==='month'||desktopSurface?<div className="month-view"><div className="weekdays">{WEEK.map((w,i)=><span key={w} className={i>4?'weekend':''}>周{w}</span>)}</div><div className="month-grid" ref={monthGridRef}>{days.map(day=>{const dt=parseDate(day),tasks=onDate(day),mark=dayMark(day),festival=festivalName(day),german=germanHoliday(day,germanState),classes=desktopSurface&&showTimetable?classesForDate(timetable,day,!!german):null;const renderItem=(item:AgendaItem,pos?:React.CSSProperties)=>{if(item.kind==='class'){const slot=item.slot;return <span key={`class-${slot.id}`} className={`calendar-event class-event ${slot.dashed?'dashed':''} ${slot.alert?'alert':''}`} style={{'--event-color':CLASS_COLOR,...pos} as React.CSSProperties} title={`${slot.start}–${slot.end} ${slot.title}${slot.alert?` · ⚠ ${slot.alert}`:''}${slot.note?` · ${slot.note}`:''}`}><b className="class-tag">课</b><small>{slot.start}</small>{slot.alert&&<b aria-label={slot.alert}>⚠</b>}<span>{slot.title||'未命名'}</span></span>;}const task=item.task;return <button key={task.id} onPointerDown={calendarPointerDown} onPointerMove={calendarPointerMove} onPointerUp={e=>calendarPointerUp(e,task,day)} onPointerCancel={e=>{calendarDrag.current=null;e.currentTarget.style.opacity=''}} className={`calendar-event ${isDone(task,day)?'done':''}`} style={{'--event-color':task.color||listOf(task.listId)?.color,...pos} as React.CSSProperties} title={desktopSurface?`${task.time?`${task.time} `:''}${task.title} · 单击标记完成，双击编辑`:undefined} onClick={e=>{e.stopPropagation();if(skipCalendarClick.current){skipCalendarClick.current=false;return;}if(!desktopSurface){editTask(task,day);return;}if(eventClickTimer.current)clearTimeout(eventClickTimer.current);eventClickTimer.current=setTimeout(()=>{eventClickTimer.current=null;complete(task,day);},250);}} onDoubleClick={e=>{e.stopPropagation();if(!desktopSurface)return;if(eventClickTimer.current){clearTimeout(eventClickTimer.current);eventClickTimer.current=null;}editTask(task,day);}}><i/>{task.time&&<small>{task.time}</small>}{task.priority==='high'&&<Star className="event-star" size={10} fill="currentColor" aria-label="星标"/>}<span>{task.title}</span>{task.notes&&<em className="event-notes">{task.notes}</em>}{task.repeat!=='none'&&<Repeat2 size={10}/>}</button>;};const layout=cellLayout(dayAgenda(tasks,classes));return <div key={day} data-date={day} tabIndex={0} role="button" aria-label={`${day}，${tasks.length} 项日程`} className={`day-cell ${dt.getMonth()!==month.getMonth()?'outside':''} ${day===today?'today':''} ${day===selected?'selected':''} ${mark?.kind==='rest'?'rest-day':''}`} onClick={()=>{selectDate(day);if(desktopSurface){if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);}else if(window.innerWidth<=1000)setView('day');}} onDoubleClick={e=>{if((e.target as Element).closest('button,.desktop-inline-editor'))return;if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);selectDate(day);if(desktopSurface){e.preventDefault();newTask(day);}else setView('day');}} onKeyDown={e=>{if(e.target!==e.currentTarget)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();selectDate(day);if(desktopSurface)newTask(day);}}} onDragOver={e=>{e.preventDefault();e.currentTarget.classList.add('dragover');}} onDragLeave={e=>e.currentTarget.classList.remove('dragover')} onDrop={e=>drop(e,day)}>
-        <div className="cell-top"><span className="day-number">{dt.getDate()}</span><span className={`lunar ${festival?'festival':''}`}>{festival||formatLunar(day)}</span>{mark&&<span className={`day-mark ${mark.kind}`} title={`${mark.name}${mark.kind==='rest'?'放假':'调休上班'}`}>{mark.kind==='rest'?'休':'班'}</span>}{german&&<span className="de-holiday" title={`德国假日：${german.german}（${german.name}）`}>德·{german.name}</span>}{(()=>{const written=hasJournal(data.journal,day);return <button className={`journal-mark ${written?'done':day===today?'pending':'idle'}`} title={written?'这天的日记已写，点开查看':day===today?`今天的日记还没写${journalReminder?`，${JOURNAL_REMINDER_TIME} 会提醒`:''}`:'写这天的日记'} aria-label={written?`${day} 的日记（已完成）`:`写 ${day} 的日记`} onClick={e=>{e.stopPropagation();openJournal(day);}} onDoubleClick={e=>e.stopPropagation()}>{written?'日记✓':'日记'}</button>;})()}<button className="cell-add" title={`在 ${day} 新建日程`} onClick={e=>{e.stopPropagation();newTask(day);}}><Plus size={13}/></button></div>
+        <div className="cell-top"><span className="day-number">{dt.getDate()}</span><span className={`lunar ${festival?'festival':''}`}>{festival||formatLunar(day)}</span>{mark&&<span className={`day-mark ${mark.kind}`} title={`${mark.name}${mark.kind==='rest'?'放假':'调休上班'}`}>{mark.kind==='rest'?'休':'班'}</span>}{german&&<span className="de-holiday" title={`德国假日：${german.german}（${german.name}）`}>德·{german.name}</span>}{(()=>{const written=hasJournal(data.journal,day);return <button className={`journal-mark ${written?'done':day===today?'pending':'idle'}`} title={`${written?'这天的日记已写':day===today?`今天的日记还没写${journalReminder?`，${JOURNAL_REMINDER_TIME} 会提醒`:''}`:'写这天的日记'} · 双击打开日记本`} aria-label={written?`${day} 的日记（已完成）`:`写 ${day} 的日记`} onClick={e=>{e.stopPropagation();if(journalClickTimer.current)clearTimeout(journalClickTimer.current);journalClickTimer.current=setTimeout(()=>{journalClickTimer.current=null;openJournal(day);},260);}} onDoubleClick={e=>{e.stopPropagation();if(journalClickTimer.current){clearTimeout(journalClickTimer.current);journalClickTimer.current=null;}openJournalWindow(day);}}>{written?'日记✓':'日记'}</button>;})()}<button className="cell-add" title={`在 ${day} 新建日程`} onClick={e=>{e.stopPropagation();newTask(day);}}><Plus size={13}/></button></div>
         <div className="cell-timeline"><CellHours>{layout.timed.map(placed=>renderItem(placed.item,{top:`${placed.top*100}%`,height:`${placed.height*100}%`,left:`${placed.lane/placed.lanes*100}%`,width:`${100/placed.lanes}%`}))}</CellHours>{layout.untimed.length>0&&<CellTasks onMore={()=>selectDate(day)}>{layout.untimed.map(item=>renderItem(item))}</CellTasks>}</div>
         {desktopSurface&&edit&&editDate===day&&inlineEditor}
       </div>;})}</div><footer className="calendar-footer"><span><i className="hint-dot"/>{desktopSurface?'单击日程标记完成 · 双击日程或日期编辑 · 右键打开桌面菜单':'双击日期展开时间表 · 拖动日程调整日期'}</span><span>{filtered.length} 项日程 <span className="footer-sep">·</span> 周一开始</span></footer></div>
@@ -460,7 +495,7 @@ function App() {
     {!desktopSurface&&!cellEditorSurface&&panel&&<aside className="day-panel"><div className="panel-title"><span><Sun size={16}/> {selected===today?'今天的安排':'当天安排'}</span><button className="icon-button" title="收起面板" onClick={()=>setPanel(false)}><PanelRightClose size={17}/></button></div><div className="selected-date"><span>{parseDate(selected).getDate()}</span><div><strong>{parseDate(selected).toLocaleDateString('zh-CN',{weekday:'long'})}</strong><small>{parseDate(selected).getFullYear()} 年 {parseDate(selected).getMonth()+1} 月 · {formatLunar(selected)}</small></div><button className="icon-button" title="展开小时日程" onClick={()=>{setView('day');setSection('calendar');}}><ArrowUpRight size={19}/></button></div><button className="expand-timeline" onClick={()=>{setView(view==='day'?'month':'day');setSection('calendar');}}><Clock3 size={16}/>{view==='day'?'返回月历':'展开 24 小时时间表'}<ChevronRight size={15}/></button>
       <div className="day-summary"><div><strong>{dayTasks.length}</strong><span>项安排</span></div><div><strong>{dayTasks.filter(t=>isDone(t,selected)).length}</strong><span>已完成</span></div><div><strong>{Math.round(dayTasks.filter(t=>t.time).reduce((n,t)=>n+t.duration,0)/60*10)/10}<small>h</small></strong><span>计划用时</span></div></div>
       <div className="panel-section-title">日程与待办 <button className="icon-button" title="添加当天日程" onClick={()=>newTask(selected)}><Plus size={16}/></button></div><div className="panel-tasks">{dayTasks.map(task=>taskRow(task,selected))}{!dayTasks.length&&<div className="empty-day"><div className="empty-day-icon"><Sun size={28}/></div><h3>{query?'没有匹配的安排':'今天，留白也很好'}</h3><p>把重要的事记在这里，<br/>剩下的时间，交给生活。</p><button onClick={()=>newTask(selected)}><Plus size={14}/> 添加第一项安排</button></div>}</div><form className="panel-quick" onSubmit={quickAdd}><Plus size={16}/><input aria-label="添加当天待办" placeholder="添加一个待办…" value={quick} onChange={e=>setQuick(e.target.value)}/></form>
-      <div className="panel-section-title"><span className="journal-title"><BookOpen size={13}/>日记{hasJournal(data.journal,selected)?<em className="journal-state done">已完成</em>:selected===today?<em className="journal-state">未写</em>:null}</span>{journalText(data.journal,selected).trim()&&<small className="journal-count">{journalText(data.journal,selected).trim().length} 字</small>}</div>
+      <div className="panel-section-title"><span className="journal-title"><BookOpen size={13}/>日记{hasJournal(data.journal,selected)?<em className="journal-state done">已完成</em>:selected===today?<em className="journal-state">未写</em>:null}</span><span className="journal-tools">{journalText(data.journal,selected).trim()&&<small className="journal-count">{journalText(data.journal,selected).trim().length} 字</small>}{window.desktop&&<button className="icon-button" title="在日记本里打开（大窗口）" aria-label="在日记本里打开" onClick={()=>openJournalWindow(selected)}><Maximize2 size={13}/></button>}</span></div>
       <JournalEditor key={`${storageKey}:${selected}`} date={selected} text={journalText(data.journal,selected)} focus={journalFocus} onSave={saveJournal}/>
       {!activeTasks.length&&<div className="welcome-card"><span>HELLO, NEW DAY</span><h3>从一个小计划开始</h3><p>还没想好记什么？试试示例安排，感受一下昱时的节奏。</p><button onClick={loadExamples}>看看示例 <ArrowUpRight size={14}/></button></div>}
       <div className="panel-bottom"><span className="status-dot"/>{user?syncState:'所有改动保存在本机'}<button title="备份与云同步" onClick={()=>setSettings(true)}><Cloud size={15}/></button></div></aside>}
@@ -489,7 +524,7 @@ function App() {
 }
 
 /** 当天日记：边写边存（停顿片刻或离开输入框时保存），切换日期也会先存好。 */
-function JournalEditor({date,text,focus,onSave}:{date:string;text:string;focus:number;onSave:(date:string,text:string)=>void}){
+function JournalEditor({date,text,focus,onSave,onCount,flushRef,className='journal-editor',placeholder='写点这一天的事、心情或想法…（自动保存，只有你能看到）'}:{date:string;text:string;focus:number;onSave:(date:string,text:string)=>void;onCount?:(count:number)=>void;flushRef?:React.MutableRefObject<()=>void>;className?:string;placeholder?:string}){
   const [draft,setDraft]=useState(text);
   const pending=useRef<string|null>(null);
   const save=useRef(onSave);save.current=onSave;
@@ -498,9 +533,11 @@ function JournalEditor({date,text,focus,onSave}:{date:string;text:string;focus:n
   const flush=useCallback(()=>{clearTimeout(timer.current);if(pending.current!==null){const value=pending.current;pending.current=null;save.current(date,value);}},[date]);
   useEffect(()=>{if(pending.current===null)setDraft(text);},[text]);
   useEffect(()=>flush,[flush]);
+  useEffect(()=>{if(flushRef)flushRef.current=flush;},[flush,flushRef]);
+  useEffect(()=>{onCount?.(draft.trim().length);},[draft,onCount]);
   const lastFocus=useRef(0);
   useEffect(()=>{if(focus&&focus!==lastFocus.current){lastFocus.current=focus;const element=box.current;if(element){element.focus();element.setSelectionRange(element.value.length,element.value.length);element.scrollIntoView({block:'nearest'});}}},[focus]);
-  return <textarea ref={box} className="journal-editor" aria-label={`${date} 的日记`} placeholder="写点这一天的事、心情或想法…（自动保存，只有你能看到）" maxLength={JOURNAL_MAX_TEXT} value={draft} onChange={e=>{setDraft(e.target.value);pending.current=e.target.value;clearTimeout(timer.current);timer.current=setTimeout(flush,700);}} onBlur={flush}/>;
+  return <textarea ref={box} className={className} aria-label={`${date} 的日记`} placeholder={placeholder} maxLength={JOURNAL_MAX_TEXT} value={draft} onChange={e=>{setDraft(e.target.value);pending.current=e.target.value;clearTimeout(timer.current);timer.current=setTimeout(flush,700);}} onBlur={flush}/>;
 }
 
 function JournalList({journal,today,onOpen}:{journal:AppData['journal'];today:string;onOpen:(date:string)=>void}){

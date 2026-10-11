@@ -558,12 +558,16 @@ function JournalSheet({ date, text, onSave, onClose }: { date: string; text: str
     <div className="sheet-layer journal-layer" onClick={close}>
       <div className="sheet journal-sheet" onClick={e => e.stopPropagation()}>
         <div className="sheet-bar">
-          <span className="journal-date">{dayTitle(date)}</span>
+          <span className="text-btn strong" aria-hidden="true" style={{ visibility: 'hidden' }}>完成</span>
           <span className="grab" />
           <button type="button" className="text-btn strong" onClick={close}>完成</button>
         </div>
-        <textarea className="journal-text" value={draft} autoFocus={!text} maxLength={JOURNAL_MAX_TEXT} placeholder="写点这一天的事、心情或想法…&#10;自动保存，只有你能看到" onChange={e => { setDraft(e.target.value); pending.current = e.target.value; clearTimeout(timer.current); timer.current = setTimeout(flush, 800); }} onBlur={flush} />
-        <p className="journal-foot">{draft.trim() ? `${draft.trim().length} 字 · 自动保存` : '空白的日记不会保存'}</p>
+        <div className="journal-head">
+          <span className="journal-day">{parseDate(date).getDate()}</span>
+          <span><b>{parseDate(date).getFullYear()} 年 {parseDate(date).getMonth() + 1} 月 · {parseDate(date).toLocaleDateString('zh-CN', { weekday: 'long' })}</b><small>{festivalName(date) || `农历${formatLunar(date)}`}{date === todayKey() ? ' · 今天' : ''}</small></span>
+        </div>
+        <textarea className="journal-text" value={draft} autoFocus={!text} maxLength={JOURNAL_MAX_TEXT} placeholder={'今天过得怎么样？\n写下发生的事、心情，或者一句想对自己说的话。'} onChange={e => { setDraft(e.target.value); pending.current = e.target.value; clearTimeout(timer.current); timer.current = setTimeout(flush, 800); }} onBlur={flush} />
+        <p className="journal-foot">{draft.trim() ? `${draft.trim().length} 字 · 自动保存 · 只有你能看到` : '空白的日记不会保存'}</p>
       </div>
     </div>
   );
