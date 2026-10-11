@@ -463,7 +463,7 @@ function App() {
       {user&&client&&<AiTokenSection client={client} userId={user.id} projectUrl={cloudUrl} toast={toast}/>}
       <div className="settings-section"><h3><Download size={17}/>数据备份</h3><p>导入采用合并方式。建议定期导出备份；不同账号拥有独立的本机空间。</p><div className="backup-buttons"><button className="secondary" onClick={downloadBackup}><Download size={15}/>导出 JSON 备份</button><button className="secondary" onClick={()=>importRef.current?.click()}><Upload size={15}/>导入并合并</button></div><input ref={importRef} type="file" accept=".json,application/json" hidden onChange={e=>void importBackup(e.target.files?.[0])}/></div>
       <div className="settings-section"><h3><Smartphone size={17}/>iPhone 使用</h3><p>在 iPhone 的 Safari 打开 https://yuquanzhao9.github.io/yushi-app/ ，点分享 →「添加到主屏幕」，用同一账号登录即可同步；在“我的”里开启提醒后，到点由云端推送。</p></div>
-      <div className="about">昱时 <span>0.1.1 · 把日子安排好</span></div>
+      <div className="about">昱时 <span>0.1.2 · 把日子安排好</span></div>
     </div></section></div>}
     {message&&<div className="toast" role="status"><Check size={17}/>{message}{undo&&message==='任务已删除'&&<button onClick={()=>{updateTask({...undo,deletedAt:undefined},true);setUndo(null);toast('已恢复任务');}}>撤销</button>}<button aria-label="关闭提示" onClick={()=>setMessage('')}><X size={15}/></button></div>}
   </div>;
