@@ -225,3 +225,14 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .cell-top .journal-mark { margin-right:26px; }
 .desktop-calendar .cell-top .day-mark, .desktop-calendar .cell-top .de-holiday { margin-right:0; }
 .desktop-calendar .cell-top .day-mark + .de-holiday { margin-left:0; }
+
+/* 周次任务：日历顶部一条进度 */
+.desktop-calendar .goal-strip { display:flex; align-items:center; gap:14px; margin:0 auto; min-width:0; overflow:hidden; }
+.desktop-calendar .goal-chip { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:12px; background:#ffffff1a; color:#eef4ff; font-size:12px; white-space:nowrap; }
+.desktop-calendar .goal-chip b { font-weight:600; }
+.desktop-calendar .goal-chip small { font-size:11px; opacity:.85; }
+.desktop-calendar .goal-chip.reached { background:#2f9e5f; }
+.desktop-calendar .goal-chip .goal-cell { background:#ffffff14; border-color:color-mix(in srgb, var(--goal) 70%, white); }
+.desktop-calendar .goal-chip .goal-cell.done { background:var(--goal); }
+.desktop-calendar .goal-chip.reached .goal-cell.done { background:#fff; color:#2f9e5f; border-color:#fff; }
+.desktop-calendar .goal-dots { margin-right:4px; }

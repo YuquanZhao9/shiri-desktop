@@ -96,6 +96,29 @@ export interface Reflection {
   deletedAt?: string;
 }
 
+/** A weekly-quota task (周次任务): do it `target` times a week, on any days, out of `slots` boxes. */
+export interface WeeklyGoal {
+  id: string;
+  name: string;
+  color: string;
+  target: number;
+  slots: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** One session of a weekly goal on a date: done, or planned for that day. */
+export interface GoalMark {
+  id: string;
+  goalId: string;
+  date: string;
+  done: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
 export interface AppData {
   version: 1;
   tasks: Task[];
@@ -106,4 +129,7 @@ export interface AppData {
   journal?: JournalEntry[];
   /** Reflections (复盘); absent until the first one. */
   reflections?: Reflection[];
+  /** Weekly-quota tasks and their sessions; absent until the first one. */
+  goals?: WeeklyGoal[];
+  goalMarks?: GoalMark[];
 }

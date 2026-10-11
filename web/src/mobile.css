@@ -326,3 +326,49 @@ svg { flex-shrink: 0; }
 .review-range { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 2px 16px 0; color: var(--ink); }
 .review-range button { color: var(--accent); display: flex; }
 .review-range b { font-size: 16px; min-width: 120px; text-align: center; }
+
+/* 周次任务 */
+.wk-card { margin: 14px 0 6px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); }
+.wk-head { display: flex; align-items: center; gap: 8px; }
+.wk-head span { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; color: var(--ink); }
+.wk-head small { font-size: 11px; color: var(--muted); }
+.wk-head .text-btn { margin-left: auto; }
+.wk-row { display: flex; align-items: center; gap: 10px; padding: 8px 0 2px; }
+.wk-row b { width: 64px; flex: none; font-size: 14px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-row.reached b { color: #3fa66b; }
+.wk-cells { display: flex; gap: 6px; flex: 1; flex-wrap: wrap; }
+.wk-cell { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 12px; font-weight: 700; border: 2px solid color-mix(in srgb, var(--goal) 55%, var(--card)); color: var(--goal); background: var(--card); }
+.wk-cell.done { background: var(--goal); border-color: var(--goal); color: #fff; }
+.wk-cell.planned { border-style: dashed; background: color-mix(in srgb, var(--goal) 12%, var(--card)); }
+.wk-cell.extra { opacity: .35; }
+.wk-count { font-size: 13px; font-weight: 700; color: var(--goal); }
+.wk-row.reached .wk-count { color: #3fa66b; }
+.wk-empty { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.wk-dots { position: absolute; top: 12px; left: 2px; display: flex; gap: 1px; }
+.wk-dots i { width: 5px; height: 5px; border-radius: 50%; border: 1px solid var(--goal); }
+.wk-dots i.done { background: var(--goal); }
+.wk-sheet { padding-bottom: calc(var(--safe-bottom) + 24px); }
+.wk-range { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 10px; color: var(--ink); }
+.wk-range button { color: var(--accent); display: flex; }
+.wk-range b { font-size: 16px; min-width: 120px; text-align: center; }
+.wk-goal { border: 1px solid var(--line); border-left: 4px solid var(--goal); border-radius: 12px; padding: 12px; margin-bottom: 10px; background: var(--card); }
+.wk-goal header { display: flex; align-items: center; gap: 8px; }
+.wk-goal header b { font-size: 16px; color: var(--ink); }
+.wk-goal header em { font-style: normal; font-size: 11px; padding: 1px 7px; border-radius: 8px; color: var(--muted); background: var(--bg); }
+.wk-goal.reached header em { color: #fff; background: #3fa66b; }
+.wk-goal header button { color: var(--muted); padding: 4px; }
+.wk-goal header button:first-of-type { margin-left: auto; }
+.wk-days { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.wk-history { display: flex; align-items: flex-end; gap: 10px; margin-top: 10px; }
+.wk-history span { display: flex; align-items: flex-end; gap: 3px; height: 28px; }
+.wk-history i { width: 10px; border-radius: 2px; background: var(--line); }
+.wk-history i.hit { background: color-mix(in srgb, var(--goal) 70%, var(--card)); }
+.wk-history small { font-size: 11px; color: var(--muted); }
+.wk-form { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin-bottom: 12px; border: 1px dashed var(--line); border-radius: 12px; background: var(--card); }
+.wk-form input { font-size: 16px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+.wk-form-row { display: flex; gap: 16px; }
+.wk-form label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); }
+.wk-form select { font-size: 15px; padding: 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.wk-colors { display: flex; gap: 8px; }
+.wk-colors button { width: 24px; height: 24px; border-radius: 50%; background: var(--goal); }
+.wk-colors button.on { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--goal); }

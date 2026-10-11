@@ -4,7 +4,7 @@
 // SUPABASE_SERVICE_ROLE_KEY 由 Supabase 自动提供）。
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import webpush from 'npm:web-push@3.6.7';
-import { dueReminders, journalDue, MULTI_LEADS, reviewDue, zonedDateKey, type ReminderTask } from './schedule.ts';
+import { dueReminders, goalDue, goalWindow, journalDue, MULTI_LEADS, reviewDue, zonedDateKey, type GoalRow, type MarkRow, type ReminderTask } from './schedule.ts';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -16,7 +16,7 @@ const env = (name: string) => {
 webpush.setVapidDetails('https://yuquanzhao9.github.io/yushi-app/', env('VAPID_PUBLIC_KEY'), env('VAPID_PRIVATE_KEY'));
 const admin = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
 
-interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean; review_reminder: boolean }
+interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean; review_reminder: boolean; goal_reminder: boolean }
 
 function sameSecret(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -28,7 +28,7 @@ function sameSecret(a: string, b: string): boolean {
 Deno.serve(async request => {
   if (!sameSecret(request.headers.get('x-cron-secret') ?? '', env('CRON_SECRET'))) return new Response('forbidden', { status: 403 });
 
-  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder,review_reminder');
+  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder,review_reminder,goal_reminder');
   if (error) return new Response(error.message, { status: 500 });
 
   const now = Date.now();
@@ -65,6 +65,18 @@ Deno.serve(async request => {
     return reviewCache.get(key)!;
   }
 
+  // 周次任务进度：只在周五 19:00 查，按账号 + 周缓存。
+  const goalCache = new Map<string, Due | null>();
+  async function goalsBehind(userId: string, window: { start: string; end: string; at: number }): Promise<Due | null> {
+    const key = `${userId}:${window.start}`;
+    if (!goalCache.has(key)) {
+      const { data: goalRows, error: goalError } = await admin.from('shiri_weekly').select('payload').eq('user_id', userId).eq('kind', 'goal').eq('deleted', false);
+      const { data: markRows, error: markError } = await admin.from('shiri_weekly').select('payload').eq('user_id', userId).eq('kind', 'mark').eq('deleted', false).gte('day', window.start).lte('day', window.end);
+      goalCache.set(key, goalError || markError ? null : goalDue((goalRows || []).map((row: { payload: GoalRow }) => row.payload), (markRows || []).map((row: { payload: MarkRow }) => row.payload), window));
+    }
+    return goalCache.get(key)!;
+  }
+
   let sent = 0;
   // 失败原因写进响应（pg_net 会保存在 net._http_response），方便排查推送没到的问题。
   const failures: { occurrence: string; status?: number; reason: string }[] = [];
@@ -76,6 +88,10 @@ Deno.serve(async request => {
       // 先看是否到点，到点了才查当天日记。
       const diary = journalDue(sub.time_zone, now, () => false);
       if (diary && !(await written(sub.user_id, zonedDateKey(now, sub.time_zone)))) due.push(diary);
+    }
+    if (sub.goal_reminder !== false) {
+      const window = goalWindow(sub.time_zone, now);
+      if (window) { const goals = await goalsBehind(sub.user_id, window); if (goals) due.push(goals); }
     }
     if (sub.review_reminder !== false) {
       const review = reviewDue(sub.time_zone, now);

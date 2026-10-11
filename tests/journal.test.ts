@@ -95,3 +95,35 @@ test('复盘：回车记一条按天编号、改空即删、合并取较新、�
   const backup = validateBackup({ ...defaultData(), reflections: removed });
   assert.equal(backup.reflections?.length, 2);
 });
+
+test('周次任务：四格选三格完成、达标、撤销、安排、历史、周五提醒、合并', async () => {
+  const w = await import('../src/weekly');
+  let goals = w.saveGoal(undefined, { id: 'gym', name: '健身', color: '#3FA66B', target: 3, slots: 4 }, Date.parse('2026-10-01T08:00:00.000Z'));
+  goals = w.saveGoal(goals, { id: 'de', name: '德语学习', color: '#3B7DDD', target: 2, slots: 3 }, Date.parse('2026-10-01T09:00:00.000Z'));
+  let marks = w.addMark(undefined, 'gym', '2026-10-12', true, 'm1');
+  marks = w.addMark(marks, 'gym', '2026-10-14', true, 'm2');
+  marks = w.addMark(marks, 'gym', '2026-10-17', false, 'm3');
+  let week = w.goalWeeks(goals, marks, '2026-10-15');
+  assert.deepEqual(week.map(g => [g.goal.name, g.done.length, g.remaining, g.cells.map(c => c.kind)]), [['健身', 2, 1, ['done', 'done', 'planned', 'empty']], ['德语学习', 0, 2, ['empty', 'empty', 'empty']]]);
+  marks = w.setMarkDone(marks, 'm3', true, Date.parse('2026-10-17T10:00:00.000Z'));
+  week = w.goalWeeks(goals, marks, '2026-10-18');
+  assert.equal(week[0].reached, true);
+  assert.equal(w.goalWeeks(goals, marks, '2026-10-19')[0].done.length, 0, '下周一重新开始');
+  marks = w.removeMark(marks, 'm1', Date.parse('2026-10-18T10:00:00.000Z'));
+  assert.equal(w.goalWeeks(goals, marks, '2026-10-18')[0].done.length, 2);
+  assert.deepEqual(w.marksOn(goals, marks, '2026-10-14').map(x => x.goal.name), ['健身']);
+  const history = w.goalHistory(goals[0], marks, '2026-10-18', 8);
+  assert.equal(history[history.length - 1].done, 2);
+  assert.equal(history[0].start, '2026-09-28');
+  const fridayNoon = new Date(2026, 9, 16, 12).getTime();
+  const due = w.goalReminders(goals, [], fridayNoon);
+  assert.equal(due.length, 1);
+  assert.equal(due[0].at, new Date(2026, 9, 16, 19, 0).getTime());
+  assert.match(due[0].body, /健身还差 3 次，德语学习还差 2 次/);
+  assert.deepEqual(w.goalReminders(goals, [], new Date(2026, 9, 16, 20).getTime()), []);
+  assert.deepEqual(w.mergeItems(marks, w.addMark(marks, 'de', '2026-10-15', true, 'm4')), w.mergeItems(w.addMark(marks, 'de', '2026-10-15', true, 'm4'), marks));
+  assert.throws(() => w.validateGoal({ ...goals[0], slots: 2 }));
+  const backup = validateBackup({ ...defaultData(), goals, goalMarks: marks });
+  assert.equal(backup.goals?.length, 2);
+  assert.equal(w.activeGoals(w.deleteGoal(goals, 'de')).length, 1);
+});

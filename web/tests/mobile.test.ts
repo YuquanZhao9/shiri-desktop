@@ -103,3 +103,15 @@ test('云端周日 20:00 复盘推送：只在周日到点', async () => {
   assert.equal(reviewDue('Europe/Berlin', zt('2026-10-17', '20:00', 'Europe/Berlin')), null);
   assert.equal(reviewDue('Europe/Berlin', sunday + 30 * 60_000), null);
 });
+
+test('云端周五 19:00 周次任务提醒：只提醒还差 2 次及以上的', async () => {
+  const { goalDue, goalWindow, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const friday = zt('2026-10-16', '19:00', 'Europe/Berlin');
+  const window = goalWindow('Europe/Berlin', friday);
+  assert.deepEqual(window && [window.start, window.end], ['2026-10-12', '2026-10-18']);
+  assert.equal(goalWindow('Europe/Berlin', zt('2026-10-15', '19:00', 'Europe/Berlin')), null);
+  const goals = [{ id: 'gym', name: '健身', target: 3 }, { id: 'de', name: '德语学习', target: 2 }];
+  const marks = [{ goalId: 'de', date: '2026-10-13', done: true }, { goalId: 'gym', date: '2026-10-11', done: true }];
+  assert.equal(goalDue(goals, marks, window!)?.body, '健身还差 3 次，周末安排一下吧');
+  assert.equal(goalDue(goals.slice(1), marks, window!), null);
+});

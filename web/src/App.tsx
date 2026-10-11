@@ -9,9 +9,12 @@ import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
-import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable } from './sync';
+import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable, syncWeekly } from './sync';
 import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
 import { Review } from './Review';
+import { WeeklyCard, WeeklySheet } from './Weekly';
+import type { WeeklyActions } from './Weekly';
+import { addMark, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, marksOn, mergeItems, removeMark, saveGoal as saveGoalItem, setMarkDone } from '@shared/weekly';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
@@ -70,6 +73,8 @@ export default function App() {
   const [journalDate, setJournalDate] = useState<string | null>(null);
   const [journalReminder, setJournalReminder] = useState(() => pref('shiri-journal-reminder', '1') !== '0');
   const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
+  const [goalReminder, setGoalReminder] = useState(() => pref('shiri-goal-reminder', '1') !== '0');
+  const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [notebook, setNotebook] = useState<'journal' | 'review'>(() => location.hash === '#review' ? 'review' : 'journal');
   const [reviewMode, setReviewMode] = useState<'day' | 'week' | 'month'>(() => location.hash === '#review' ? 'week' : 'day');
 
@@ -146,6 +151,10 @@ export default function App() {
       const timetable = await syncTimetable(client, owner.id, dataRef.current.timetable);
       if (timetable && keyRef.current === key) {
         setData(prev => prev.timetable && prev.timetable.updatedAt > timetable.updatedAt || JSON.stringify(prev.timetable) === JSON.stringify(timetable) ? prev : { ...prev, timetable });
+      }
+      const weekly = await syncWeekly(client, owner.id, dataRef.current.goals, dataRef.current.goalMarks);
+      if (weekly && keyRef.current === key) {
+        setData(prev => { const goals = mergeItems(prev.goals, weekly.goals), goalMarks = mergeItems(prev.goalMarks, weekly.marks); return JSON.stringify(goals) === JSON.stringify(mergeItems(prev.goals)) && JSON.stringify(goalMarks) === JSON.stringify(mergeItems(prev.goalMarks)) ? prev : { ...prev, goals, goalMarks }; });
       }
       const reflections = await syncReflections(client, owner.id, dataRef.current.reflections);
       if (reflections && keyRef.current === key) {
@@ -230,6 +239,13 @@ export default function App() {
     if (!ready) return;
     setData(prev => { const journal = writeJournal(prev.journal, date, text); return journal === prev.journal || (!prev.journal && !journal.length) ? prev : { ...prev, journal }; });
   }
+  const weeklyActions: WeeklyActions = {
+    saveGoal: goal => { if (!ready) return; const id = goal.id || uid(); setData(prev => { const goals = saveGoalItem(prev.goals, { ...goal, id }); return goals === prev.goals ? prev : { ...prev, goals }; }); },
+    deleteGoal: id => { if (ready) setData(prev => ({ ...prev, goals: deleteGoalItem(prev.goals, id) })); },
+    addMark: (goalId, date, done) => { if (!ready) return; const id = uid(); setData(prev => ({ ...prev, goalMarks: addMark(prev.goalMarks, goalId, date, done, id) })); },
+    setMarkDone: (id, done) => { if (ready) setData(prev => ({ ...prev, goalMarks: setMarkDone(prev.goalMarks, id, done) })); },
+    removeMark: id => { if (ready) setData(prev => ({ ...prev, goalMarks: removeMark(prev.goalMarks, id) })); },
+  };
   function addReview(date: string, text: string) {
     if (!ready) return;
     const id = uid();
@@ -344,6 +360,7 @@ export default function App() {
                 <span className="num">{d.getDate()}</span>
                 {mark && <span className="badge">{mark.kind === 'rest' ? '休' : '班'}</span>}
                 {hasJournal(data.journal, key) && <span className="diary-badge" aria-label="日记已写">记✓</span>}
+                {marksOn(data.goals, data.goalMarks, key).length > 0 && <span className="wk-dots">{marksOn(data.goals, data.goalMarks, key).slice(0, 3).map(({ goal, mark }) => <i key={mark.id} className={mark.done ? 'done' : ''} style={{ '--goal': goal.color } as React.CSSProperties} />)}</span>}
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
               <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
@@ -369,6 +386,7 @@ export default function App() {
         </form>
         {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
+        <WeeklyCard goals={data.goals} marks={data.goalMarks} date={selected} onManage={() => setWeeklyOpen(true)} actions={weeklyActions} />
         <button className={`diary-card${hasJournal(data.journal, selected) ? ' done' : ''}`} onClick={() => setJournalDate(selected)}>
           <span className="diary-card-head"><BookOpen size={16} />日记<em>{hasJournal(data.journal, selected) ? '已完成' : selected === today ? '还没写' : '未写'}</em></span>
           {hasJournal(data.journal, selected) ? <span className="diary-preview">{journalText(data.journal, selected).trim()}</span> : <span className="diary-preview muted">点这里写下这一天{selected === today && journalReminder ? `（${JOURNAL_REMINDER_TIME} 还没写会提醒）` : ''}</span>}
@@ -434,15 +452,21 @@ export default function App() {
             pushOn={pushOn} lead={lead} germanState={germanState}
             journalReminder={journalReminder}
             reviewReminder={reviewReminder}
+            goalReminder={goalReminder}
+            onGoalReminder={async value => {
+              setGoalReminder(value); setPref('shiri-goal-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, reviewReminder, value).catch(e => say((e as Error).message));
+            }}
             onReviewReminder={async value => {
               setReviewReminder(value); setPref('shiri-review-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, value).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, value, goalReminder).catch(e => say((e as Error).message));
             }}
             onJournalReminder={async value => {
               setJournalReminder(value); setPref('shiri-journal-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value, reviewReminder).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value, reviewReminder, goalReminder).catch(e => say((e as Error).message));
             }}
             onGermanState={value => { setGermanState(value); setPref('shiri-de-state', value); }} say={say} sync={() => void runSync()}
             onConfig={(url, key) => { const next = saveCloudConfig(url, key); setClient(next); setConfig(cloudConfig()); }}
@@ -456,14 +480,14 @@ export default function App() {
             onLead={async value => {
               setLead(value); setPref('shiri-reminder-lead', String(value));
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder, reviewReminder).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder, reviewReminder, goalReminder).catch(e => say((e as Error).message));
             }}
             onMergeLocal={() => {
               try {
                 const raw = localStorage.getItem(LOCAL_KEY);
                 if (!raw) { say('这台手机上没有未登录时记下的日程'); return; }
                 const local = validateBackup(JSON.parse(raw));
-                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}), ...(local.reflections ? { reflections: mergeReflections(prev.reflections, local.reflections) } : {}) }));
+                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}), ...(local.reflections ? { reflections: mergeReflections(prev.reflections, local.reflections) } : {}), ...(local.goals ? { goals: mergeItems(prev.goals, local.goals) } : {}), ...(local.goalMarks ? { goalMarks: mergeItems(prev.goalMarks, local.goalMarks) } : {}) }));
                 say('已并入当前账号，正在同步');
               } catch { say('本机数据未能读取'); }
             }}
@@ -483,6 +507,7 @@ export default function App() {
         <TabButton on={tab === 'me'} onClick={() => setTab('me')} icon={<UserRound size={22} />} label="我的" badge={!user && !!config} />
       </nav>
 
+      {weeklyOpen && <WeeklySheet goals={data.goals} marks={data.goalMarks} today={today} onClose={() => setWeeklyOpen(false)} actions={weeklyActions} />}
       {journalDate && <JournalSheet key={journalDate} date={journalDate} text={journalText(data.journal, journalDate)} onSave={saveJournal} onClose={() => setJournalDate(null)} />}
       {editing && <Editor key={editing.task.id} task={editing.task} isNew={editing.isNew} lists={lists} onSave={save} onDelete={remove} onClose={() => setEditing(null)} />}
       {toast && (
@@ -610,12 +635,13 @@ interface MeProps {
   syncState: string; data: AppData; pushOn: boolean; lead: number; germanState: GermanState; onGermanState: (value: GermanState) => void;
   journalReminder: boolean; onJournalReminder: (value: boolean) => void;
   reviewReminder: boolean; onReviewReminder: (value: boolean) => void;
+  goalReminder: boolean; onGoalReminder: (value: boolean) => void;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
   passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetOffer, setResetOffer] = useState('');
@@ -677,7 +703,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
     setBusy(true);
     try {
       if (pushOn) { await disablePush(client); onPush(false); say('已关闭这台手机的提醒'); }
-      else { await enablePush(client, user.id, lead, journalReminder, reviewReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
+      else { await enablePush(client, user.id, lead, journalReminder, reviewReminder, goalReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
     } catch (error) { say((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -757,6 +783,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
               <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
               <label className="kv"><span>{JOURNAL_REMINDER_TIME} 还没写日记时提醒</span><input type="checkbox" className="switch" checked={journalReminder} disabled={busy} onChange={e => onJournalReminder(e.target.checked)} /></label>
               <label className="kv"><span>每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总</span><input type="checkbox" className="switch" checked={reviewReminder} disabled={busy} onChange={e => onReviewReminder(e.target.checked)} /></label>
+              <label className="kv"><span>周五 {GOAL_REMINDER_TIME} 周次任务还差 2 次及以上时提醒</span><input type="checkbox" className="switch" checked={goalReminder} disabled={busy} onChange={e => onGoalReminder(e.target.checked)} /></label>
             </div>
           )}
         </div>

@@ -128,3 +128,29 @@ export function reviewDue(timeZone: string, now: number, lookbackMs = 10 * 60_00
   if (at <= now - lookbackMs || at > now + aheadMs) return null;
   return { start: shiftKey(today, -6), end: today, due: { occurrence: `review:${today}:${REVIEW_TIME}`, title: '本周复盘汇总好了', body: '这周的感悟都整理在一起了，点开看看', at } };
 }
+
+/** 周五这个时间，周次任务还差 2 次及以上时提醒（与桌面版 src/weekly.ts 的 GOAL_REMINDER_TIME 相同）。 */
+export const GOAL_TIME = '19:00';
+
+export interface GoalRow { id: string; name: string; target: number; deletedAt?: string }
+export interface MarkRow { goalId: string; date: string; done: boolean; deletedAt?: string }
+
+/** 用户所在时区的周五 19:00：返回本周（周一起）范围和推送用的进度；不是这个时刻返回 null。 */
+export function goalWindow(timeZone: string, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): { start: string; end: string; at: number } | null {
+  const today = zonedDateKey(now, timeZone);
+  const [y, m, d] = today.split('-').map(Number);
+  if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() !== 5) return null;
+  const at = zonedTime(today, GOAL_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs) return null;
+  return { start: shiftKey(today, -4), end: shiftKey(today, 2), at };
+}
+
+/** 还差 2 次及以上的任务拼成一条推送；都快完成了返回 null。 */
+export function goalDue(goals: GoalRow[], marks: MarkRow[], window: { start: string; end: string; at: number }): Due | null {
+  const behind = goals.filter(goal => !goal.deletedAt).map(goal => {
+    const done = marks.filter(mark => !mark.deletedAt && mark.done && mark.goalId === goal.id && mark.date >= window.start && mark.date <= window.end).length;
+    return { name: goal.name, remaining: Math.max(0, goal.target - done) };
+  }).filter(item => item.remaining >= 2);
+  if (!behind.length) return null;
+  return { occurrence: `goals:${window.start}:${GOAL_TIME}`, title: '这周的周次任务还差几次', body: `${behind.map(item => `${item.name}还差 ${item.remaining} 次`).join('，')}，周末安排一下吧`, at: window.at };
+}
