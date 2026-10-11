@@ -115,3 +115,16 @@ export function journalDue(timeZone: string, now: number, written: (day: string)
   if (at <= now - lookbackMs || at > now + aheadMs || written(today)) return null;
   return { occurrence: `journal:${today}:${JOURNAL_TIME}`, title: '该写今天的日记了', body: '今天的日记还没写，花几分钟记下今天吧', at };
 }
+
+/** 每周日这个时间提醒看本周复盘汇总（与桌面版 src/reflections.ts 的 REVIEW_REMINDER_TIME 相同）。 */
+export const REVIEW_TIME = '20:00';
+
+/** 用户所在时区的周日 20:00 到点时返回本周（周一到周日）的范围和推送；不是这个时刻返回 null。 */
+export function reviewDue(timeZone: string, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): { start: string; end: string; due: Due } | null {
+  const today = zonedDateKey(now, timeZone);
+  const [y, m, d] = today.split('-').map(Number);
+  if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() !== 0) return null;
+  const at = zonedTime(today, REVIEW_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs) return null;
+  return { start: shiftKey(today, -6), end: today, due: { occurrence: `review:${today}:${REVIEW_TIME}`, title: '本周复盘汇总好了', body: '这周的感悟都整理在一起了，点开看看', at } };
+}

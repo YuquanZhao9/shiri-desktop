@@ -86,6 +86,16 @@ export interface JournalEntry {
   updatedAt: string;
 }
 
+/** One reflection (复盘): a short note; Enter adds the next one. Deletions keep a tombstone so they sync. */
+export interface Reflection {
+  id: string;
+  date: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
 export interface AppData {
   version: 1;
   tasks: Task[];
@@ -94,4 +104,6 @@ export interface AppData {
   timetable?: Timetable;
   /** Diary pages; absent until the first one is written. */
   journal?: JournalEntry[];
+  /** Reflections (复盘); absent until the first one. */
+  reflections?: Reflection[];
 }

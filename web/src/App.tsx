@@ -9,7 +9,9 @@ import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
-import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncTimetable } from './sync';
+import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable } from './sync';
+import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
+import { Review } from './Review';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
@@ -53,7 +55,7 @@ export default function App() {
   const [selected, setSelected] = useState(() => hashDate() || todayKey());
   const [cursor, setCursor] = useState(() => { const d = parseDate(hashDate() || todayKey()); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [compact, setCompact] = useState(() => pref('shiri-m-compact', 'false') === 'true');
-  const [tab, setTab] = useState<Tab>(() => hasPasswordRecoveryLink() ? 'me' : 'calendar');
+  const [tab, setTab] = useState<Tab>(() => hasPasswordRecoveryLink() ? 'me' : location.hash === '#review' ? 'journal' : 'calendar');
   const [passwordRecovery, setPasswordRecovery] = useState(hasPasswordRecoveryLink);
   const [editing, setEditing] = useState<{ task: Task; isNew: boolean } | null>(null);
   const [quick, setQuick] = useState('');
@@ -67,6 +69,9 @@ export default function App() {
   const [hideDone, setHideDone] = useState(() => pref('shiri-m-hide-done', 'false') === 'true');
   const [journalDate, setJournalDate] = useState<string | null>(null);
   const [journalReminder, setJournalReminder] = useState(() => pref('shiri-journal-reminder', '1') !== '0');
+  const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
+  const [notebook, setNotebook] = useState<'journal' | 'review'>(() => location.hash === '#review' ? 'review' : 'journal');
+  const [reviewMode, setReviewMode] = useState<'day' | 'week' | 'month'>(() => location.hash === '#review' ? 'week' : 'day');
 
   const dataRef = useRef(data); dataRef.current = data;
   const keyRef = useRef(storageKey); keyRef.current = storageKey;
@@ -94,7 +99,11 @@ export default function App() {
   useEffect(() => { const t = setInterval(() => setToday(todayKey()), 30_000); return () => clearInterval(t); }, []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), toast.undo ? 6000 : 3500); return () => clearTimeout(t); }, [toast]);
   useEffect(() => {
-    const open = () => { const key = hashDate(); if (key) { pick(key); setTab('calendar'); history.replaceState(null, '', location.pathname); } };
+    const open = () => {
+      // 周日复盘提醒点开：直接到本周汇总。
+      if (location.hash === '#review') { setTab('journal'); setNotebook('review'); setReviewMode('week'); history.replaceState(null, '', location.pathname); return; }
+      const key = hashDate(); if (key) { pick(key); setTab('calendar'); history.replaceState(null, '', location.pathname); }
+    };
     open(); window.addEventListener('hashchange', open); return () => window.removeEventListener('hashchange', open);
   }, []);
 
@@ -137,6 +146,10 @@ export default function App() {
       const timetable = await syncTimetable(client, owner.id, dataRef.current.timetable);
       if (timetable && keyRef.current === key) {
         setData(prev => prev.timetable && prev.timetable.updatedAt > timetable.updatedAt || JSON.stringify(prev.timetable) === JSON.stringify(timetable) ? prev : { ...prev, timetable });
+      }
+      const reflections = await syncReflections(client, owner.id, dataRef.current.reflections);
+      if (reflections && keyRef.current === key) {
+        setData(prev => { const merged = mergeReflections(prev.reflections, reflections); return JSON.stringify(merged) === JSON.stringify(mergeReflections(prev.reflections)) ? prev : { ...prev, reflections: merged }; });
       }
       const journal = await syncJournal(client, owner.id, dataRef.current.journal);
       if (journal && keyRef.current === key) {
@@ -216,6 +229,15 @@ export default function App() {
   function saveJournal(date: string, text: string) {
     if (!ready) return;
     setData(prev => { const journal = writeJournal(prev.journal, date, text); return journal === prev.journal || (!prev.journal && !journal.length) ? prev : { ...prev, journal }; });
+  }
+  function addReview(date: string, text: string) {
+    if (!ready) return;
+    const id = uid();
+    setData(prev => { const reflections = addReflection(prev.reflections, date, text, id); return reflections === prev.reflections ? prev : { ...prev, reflections }; });
+  }
+  function editReview(id: string, text: string) {
+    if (!ready) return;
+    setData(prev => { const reflections = editReflection(prev.reflections, id, text); return reflections === prev.reflections ? prev : { ...prev, reflections }; });
   }
   function quickAdd(event: FormEvent, date: string) {
     event.preventDefault();
@@ -383,8 +405,11 @@ export default function App() {
 
   const journalPage = (
     <section className="page journal-page">
-      <header className="top"><h1>日记</h1><button className="today-btn" onClick={() => setJournalDate(today)}>{hasJournal(data.journal, today) ? '今天' : '写今天'}</button></header>
-      <div className="scroll">
+      <header className="top">
+        <div className="seg">{([['journal', '日记'], ['review', '复盘']] as const).map(([value, label]) => <button key={value} className={notebook === value ? 'on' : ''} onClick={() => setNotebook(value)}>{label}</button>)}</div>
+        {notebook === 'journal' && <button className="today-btn" onClick={() => setJournalDate(today)}>{hasJournal(data.journal, today) ? '今天' : '写今天'}</button>}
+      </header>
+      {notebook === 'review' ? <div className="scroll"><Review reflections={data.reflections} today={today} mode={reviewMode} onMode={setReviewMode} remind={reviewReminder} onAdd={addReview} onEdit={editReview} /></div> : <div className="scroll">
         {writtenEntries(data.journal).map(entry => (
           <button key={entry.date} className="diary-item" onClick={() => setJournalDate(entry.date)}>
             <b>{dayTitle(entry.date)}<small>{entry.date.slice(0, 4)}</small></b>
@@ -392,7 +417,7 @@ export default function App() {
           </button>
         ))}
         {!writtenEntries(data.journal).length && <p className="empty">还没有日记。点右上角写下今天。</p>}
-      </div>
+      </div>}
     </section>
   );
 
@@ -408,10 +433,16 @@ export default function App() {
             config={config} client={client} user={user} authChecked={authChecked} syncState={syncState} data={data}
             pushOn={pushOn} lead={lead} germanState={germanState}
             journalReminder={journalReminder}
+            reviewReminder={reviewReminder}
+            onReviewReminder={async value => {
+              setReviewReminder(value); setPref('shiri-review-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, value).catch(e => say((e as Error).message));
+            }}
             onJournalReminder={async value => {
               setJournalReminder(value); setPref('shiri-journal-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value, reviewReminder).catch(e => say((e as Error).message));
             }}
             onGermanState={value => { setGermanState(value); setPref('shiri-de-state', value); }} say={say} sync={() => void runSync()}
             onConfig={(url, key) => { const next = saveCloudConfig(url, key); setClient(next); setConfig(cloudConfig()); }}
@@ -425,14 +456,14 @@ export default function App() {
             onLead={async value => {
               setLead(value); setPref('shiri-reminder-lead', String(value));
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder, reviewReminder).catch(e => say((e as Error).message));
             }}
             onMergeLocal={() => {
               try {
                 const raw = localStorage.getItem(LOCAL_KEY);
                 if (!raw) { say('这台手机上没有未登录时记下的日程'); return; }
                 const local = validateBackup(JSON.parse(raw));
-                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}) }));
+                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}), ...(local.reflections ? { reflections: mergeReflections(prev.reflections, local.reflections) } : {}) }));
                 say('已并入当前账号，正在同步');
               } catch { say('本机数据未能读取'); }
             }}
@@ -578,12 +609,13 @@ interface MeProps {
   config: ReturnType<typeof cloudConfig>; client: SupabaseClient | null; user: { id: string; email?: string } | null; authChecked: boolean;
   syncState: string; data: AppData; pushOn: boolean; lead: number; germanState: GermanState; onGermanState: (value: GermanState) => void;
   journalReminder: boolean; onJournalReminder: (value: boolean) => void;
+  reviewReminder: boolean; onReviewReminder: (value: boolean) => void;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
   passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetOffer, setResetOffer] = useState('');
@@ -645,7 +677,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
     setBusy(true);
     try {
       if (pushOn) { await disablePush(client); onPush(false); say('已关闭这台手机的提醒'); }
-      else { await enablePush(client, user.id, lead, journalReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
+      else { await enablePush(client, user.id, lead, journalReminder, reviewReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
     } catch (error) { say((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -724,6 +756,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
               <label className="kv"><span>推送到这台手机</span><input type="checkbox" className="switch" checked={pushOn} disabled={busy || !user} onChange={() => void togglePush()} /></label>
               <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
               <label className="kv"><span>{JOURNAL_REMINDER_TIME} 还没写日记时提醒</span><input type="checkbox" className="switch" checked={journalReminder} disabled={busy} onChange={e => onJournalReminder(e.target.checked)} /></label>
+              <label className="kv"><span>每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总</span><input type="checkbox" className="switch" checked={reviewReminder} disabled={busy} onChange={e => onReviewReminder(e.target.checked)} /></label>
             </div>
           )}
         </div>
@@ -740,6 +773,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
           <h3><Download size={17} />数据</h3>
           <div className="kv"><span>日程</span><b>{data.tasks.filter(t => !t.deletedAt).length} 条</b></div>
           <div className="kv"><span>日记</span><b>{writtenEntries(data.journal).length} 篇</b></div>
+          <div className="kv"><span>复盘</span><b>{(data.reflections ?? []).filter(r => !r.deletedAt).length} 条</b></div>
           <button className="secondary wide" onClick={() => void exportBackup()}><Download size={16} />导出备份</button>
         </div>
         <p className="footer">昱时 · iPhone 网页版 0.1.0</p>

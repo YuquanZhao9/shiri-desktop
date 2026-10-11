@@ -1,5 +1,6 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import type { JournalEntry, TaskList, Timetable } from './types';
+import type { JournalEntry, Reflection, TaskList, Timetable } from './types';
+import { mergeReflections, newerReflection, validateReflection } from './reflections';
 import { validateTimetable } from './timetable';
 import { mergeJournal, newerEntry, validateJournalEntry } from './journal';
 
@@ -101,6 +102,31 @@ export async function syncJournal(client: SupabaseClient, userId: string, local:
   return mergeJournal(local, remote);
 }
 
+/**
+ * 复盘同步：云端每条一行，较新的为准（同 src/reflections.ts newerReflection）。
+ * 云端没建复盘表（schema-v6.sql）或读取失败时返回 null。
+ */
+export async function syncReflections(client: SupabaseClient, userId: string, local: Reflection[] = []): Promise<Reflection[] | null> {
+  const remote: Reflection[] = [];
+  for (let start = 0; ; start += 500) {
+    const { data, error } = await client.from('shiri_reflections').select('payload').eq('user_id', userId).order('id').range(start, start + 499);
+    if (error) return null;
+    for (const row of (data || []) as { payload: unknown }[]) { try { remote.push(validateReflection(row.payload)); } catch { /* 跳过损坏的一行 */ } }
+    if (!data || data.length < 500) break;
+  }
+  const push = reflectionsToPush(local, remote);
+  for (let start = 0; start < push.length; start += 200) {
+    const { error } = await client.rpc('merge_reflections', { incoming: push.slice(start, start + 200), expected_user: userId });
+    if (error) return null;
+  }
+  return mergeReflections(local, remote);
+}
+
+export function reflectionsToPush(local: Reflection[], remote: Reflection[]): Reflection[] {
+  const byId = new Map(remote.map(item => [item.id, item]));
+  return local.filter(item => { const other = byId.get(item.id); return !other || newerReflection(item, other) === item && JSON.stringify(item) !== JSON.stringify(other); });
+}
+
 /** 本机比云端新的日记（云端没有的也算）。 */
 export function journalToPush(local: JournalEntry[], remote: JournalEntry[]): JournalEntry[] {
   const remoteByDate = new Map(remote.map(entry => [entry.date, entry]));
@@ -114,6 +140,7 @@ export function subscribeLive(client: SupabaseClient, userId: string, onChange: 
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_lists', filter: `user_id=eq.${userId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_timetable', filter: `user_id=eq.${userId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_journal', filter: `user_id=eq.${userId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_reflections', filter: `user_id=eq.${userId}` }, onChange)
     .subscribe();
   return () => { void client.removeChannel(channel); };
 }

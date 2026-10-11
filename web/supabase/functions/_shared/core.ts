@@ -2,6 +2,7 @@
 import type { AppData, Task, TaskList } from './types.ts';
 import { validateTimetable } from './timetable.ts';
 import { validateJournal } from './journal.ts';
+import { validateReflections } from './reflections.ts';
 
 const DAY_MS = 86_400_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -171,7 +172,7 @@ export const TASK_COLORS = ['#E5534B', '#F08C2E', '#D6A92B', '#3FA66B', '#1FA3A3
 
 /** Validate and copy untrusted imports before they can replace local data. */
 export function validateBackup(input: unknown): AppData {
-  const root = record(input, ['version', 'tasks', 'lists', 'timetable', 'journal'], '备份');
+  const root = record(input, ['version', 'tasks', 'lists', 'timetable', 'journal', 'reflections'], '备份');
   if (root.version !== 1) throw new Error('不支持的备份版本');
   if (!Array.isArray(root.tasks) || root.tasks.length > MAX_TASKS) throw new Error(`任务数量不能超过 ${MAX_TASKS}`);
   if (!Array.isArray(root.lists) || !root.lists.length || root.lists.length > MAX_LISTS) throw new Error(`清单数量须为 1 至 ${MAX_LISTS}`);
@@ -220,7 +221,8 @@ export function validateBackup(input: unknown): AppData {
   });
   const timetable = root.timetable === undefined ? undefined : validateTimetable(root.timetable);
   const journal = root.journal === undefined ? undefined : validateJournal(root.journal);
-  return { version: 1, tasks, lists, ...(timetable ? { timetable } : {}), ...(journal ? { journal } : {}) };
+  const reflections = root.reflections === undefined ? undefined : validateReflections(root.reflections);
+  return { version: 1, tasks, lists, ...(timetable ? { timetable } : {}), ...(journal ? { journal } : {}), ...(reflections ? { reflections } : {}) };
 }
 
 function taskRevision(task: Task): string {

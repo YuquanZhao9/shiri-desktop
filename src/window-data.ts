@@ -2,6 +2,7 @@ import type { AppData } from './types';
 import { mergeTasks } from './core';
 import { newerTimetable } from './timetable';
 import { mergeJournal } from './journal';
+import { mergeReflections } from './reflections';
 
 /** Merge snapshots from the desktop calendar and management window. */
 export function mergeWindowData(current: AppData, incoming: AppData): AppData {
@@ -18,5 +19,6 @@ export function mergeWindowData(current: AppData, incoming: AppData): AppData {
   const timetable = newerTimetable(current.timetable, incoming.timetable);
   if (timetable) next.timetable = timetable;
   if (current.journal || incoming.journal) next.journal = mergeJournal(current.journal, incoming.journal);
+  if (current.reflections || incoming.reflections) next.reflections = mergeReflections(current.reflections, incoming.reflections);
   return JSON.stringify(next) === JSON.stringify(current) ? current : next;
 }

@@ -4,7 +4,7 @@
 // SUPABASE_SERVICE_ROLE_KEY 由 Supabase 自动提供）。
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import webpush from 'npm:web-push@3.6.7';
-import { dueReminders, journalDue, MULTI_LEADS, zonedDateKey, type ReminderTask } from './schedule.ts';
+import { dueReminders, journalDue, MULTI_LEADS, reviewDue, zonedDateKey, type ReminderTask } from './schedule.ts';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -16,7 +16,7 @@ const env = (name: string) => {
 webpush.setVapidDetails('https://yuquanzhao9.github.io/yushi-app/', env('VAPID_PUBLIC_KEY'), env('VAPID_PRIVATE_KEY'));
 const admin = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
 
-interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean }
+interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean; review_reminder: boolean }
 
 function sameSecret(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -28,7 +28,7 @@ function sameSecret(a: string, b: string): boolean {
 Deno.serve(async request => {
   if (!sameSecret(request.headers.get('x-cron-secret') ?? '', env('CRON_SECRET'))) return new Response('forbidden', { status: 403 });
 
-  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder');
+  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder,review_reminder');
   if (error) return new Response(error.message, { status: 500 });
 
   const now = Date.now();
@@ -53,6 +53,18 @@ Deno.serve(async request => {
     return writtenCache.get(key)!;
   }
 
+  // 这一周写了几条复盘：只在周日 20:00 查，按账号 + 周缓存。
+  const reviewCache = new Map<string, number>();
+  async function reviewCount(userId: string, start: string, end: string): Promise<number> {
+    const key = `${userId}:${start}`;
+    if (!reviewCache.has(key)) {
+      const { count, error: reviewError } = await admin.from('shiri_reflections').select('id', { count: 'exact', head: true })
+        .eq('user_id', userId).eq('deleted', false).gte('day', start).lte('day', end);
+      reviewCache.set(key, reviewError ? 0 : count ?? 0);
+    }
+    return reviewCache.get(key)!;
+  }
+
   let sent = 0;
   // 失败原因写进响应（pg_net 会保存在 net._http_response），方便排查推送没到的问题。
   const failures: { occurrence: string; status?: number; reason: string }[] = [];
@@ -65,6 +77,13 @@ Deno.serve(async request => {
       const diary = journalDue(sub.time_zone, now, () => false);
       if (diary && !(await written(sub.user_id, zonedDateKey(now, sub.time_zone)))) due.push(diary);
     }
+    if (sub.review_reminder !== false) {
+      const review = reviewDue(sub.time_zone, now);
+      if (review) {
+        const count = await reviewCount(sub.user_id, review.start, review.end);
+        if (count) due.push({ ...review.due, body: `这周写下了 ${count} 条感悟，点开看本周汇总` });
+      }
+    }
     for (const item of due) {
       // 先占位再发送：并发或重跑时同一提醒只发一次。
       const { error: claimError } = await admin.from('shiri_push_sent').insert({ endpoint: sub.endpoint, occurrence: item.occurrence });
@@ -72,7 +91,7 @@ Deno.serve(async request => {
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify({ title: item.title, body: item.body, tag: item.occurrence, date: item.occurrence.split(':')[1] }),
+          JSON.stringify({ title: item.title, body: item.body, tag: item.occurrence, ...(item.occurrence.startsWith('review:') ? { hash: 'review' } : { date: item.occurrence.split(':')[1] }) }),
           { TTL: 3600, urgency: 'high' },
         );
         sent++;

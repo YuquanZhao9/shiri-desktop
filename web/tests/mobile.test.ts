@@ -92,3 +92,14 @@ test('云端 21:00 日记推送：按用户时区到点、没写才推', async (
   assert.equal(journalDue('Europe/Berlin', nine + 20 * 60_000, () => false), null);
   assert.equal(nine, Date.parse('2026-10-11T19:00:00.000Z'));
 });
+
+test('云端周日 20:00 复盘推送：只在周日到点', async () => {
+  const { reviewDue, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const sunday = zt('2026-10-18', '20:00', 'Europe/Berlin');
+  const due = reviewDue('Europe/Berlin', sunday);
+  assert.equal(due?.start, '2026-10-12');
+  assert.equal(due?.end, '2026-10-18');
+  assert.equal(due?.due.occurrence, 'review:2026-10-18:20:00');
+  assert.equal(reviewDue('Europe/Berlin', zt('2026-10-17', '20:00', 'Europe/Berlin')), null);
+  assert.equal(reviewDue('Europe/Berlin', sunday + 30 * 60_000), null);
+});

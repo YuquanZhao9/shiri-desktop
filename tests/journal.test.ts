@@ -68,3 +68,30 @@ test('段落间空一行：旧日记显示时隔开，回车自动空行', async
   assert.deepEqual(paragraphBreak('第一段\n\n', 5, 5), { text: '第一段\n\n\n', caret: 6 });
   assert.deepEqual(paragraphBreak('前半后半', 2, 2), { text: '前半\n\n后半', caret: 4 });
 });
+
+test('复盘：回车记一条按天编号、改空即删、合并取较新、周汇总与周日提醒', async () => {
+  const r = await import('../src/reflections');
+  let list = r.addReflection(undefined, '2026-10-12', '  第一条感悟  ', 'a', Date.parse('2026-10-12T08:00:00.000Z'));
+  list = r.addReflection(list, '2026-10-12', '第二条', 'b', Date.parse('2026-10-12T09:00:00.000Z'));
+  list = r.addReflection(list, '2026-10-13', '   ', 'c');
+  assert.equal(list.length, 2);
+  assert.deepEqual(r.reflectionsByDay(list).map(g => [g.date, g.items.map(i => i.text)]), [['2026-10-12', ['第一条感悟', '第二条']]]);
+  const edited = r.editReflection(list, 'a', '改过的', Date.parse('2026-10-12T07:00:00.000Z'));
+  assert.equal(edited.find(i => i.id === 'a')?.text, '改过的');
+  assert.equal(edited.find(i => i.id === 'a')?.updatedAt, '2026-10-12T08:00:00.001Z');
+  const removed = r.deleteReflection(edited, 'b', Date.parse('2026-10-12T10:00:00.000Z'));
+  assert.deepEqual(r.activeReflections(removed).map(i => i.id), ['a']);
+  assert.deepEqual(r.mergeReflections(list, removed), r.mergeReflections(removed, list));
+  assert.equal(r.mergeReflections(list, removed).find(i => i.id === 'b')?.deletedAt, '2026-10-12T10:00:00.000Z');
+  assert.deepEqual(r.validateReflections(JSON.parse(JSON.stringify(removed))), removed);
+  assert.deepEqual(r.weekRange('2026-10-14'), { start: '2026-10-12', end: '2026-10-18' });
+  assert.deepEqual(r.monthRange('2026-02-10'), { start: '2026-02-01', end: '2026-02-28' });
+  assert.equal(r.shiftRange('2026-01-31', 'month', 1).slice(0, 7), '2026-02');
+  const now = new Date(2026, 9, 14, 12).getTime();
+  const due = r.reviewReminders(list, now);
+  assert.equal(due.length, 1);
+  assert.equal(due[0].at, new Date(2026, 9, 18, 20, 0).getTime());
+  assert.deepEqual(r.reviewReminders([], now), []);
+  const backup = validateBackup({ ...defaultData(), reflections: removed });
+  assert.equal(backup.reflections?.length, 2);
+});

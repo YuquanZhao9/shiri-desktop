@@ -62,3 +62,31 @@
 .jw-task.done span{text-decoration:line-through;opacity:.55}
 .jw-foot{display:flex;justify-content:space-between;font-size:11px;color:var(--soft);padding:0 4px}
 @media(max-width:640px){.jw-side{display:none}.journal-window{padding:18px 16px 12px}}
+/* 复盘 */
+.review-view{display:flex;flex-direction:column;gap:14px}
+.review-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.review-top h2{display:flex;align-items:center;gap:8px;margin:0;font-size:15px;font-weight:600;color:#4f5a74}
+.review-top h2 svg{color:#d29b3c}
+.review-add{border:1px solid #ecdcbf;background:#fffaf0;border-radius:10px;padding:10px 12px}
+.review-add textarea{width:100%;border:0;outline:none;resize:none;background:transparent;font-size:13px;line-height:1.7;color:#4c4a43}
+.review-add textarea::placeholder{color:#c0b4a0}
+.review-add-bar{display:flex;align-items:center;gap:12px;margin-top:6px;font-size:10px;color:#a69a86}
+.review-add-bar label{display:flex;align-items:center;gap:6px}
+.review-add-bar input[type=date]{border:1px solid #ecdcbf;border-radius:5px;padding:3px 6px;font-size:11px;color:#7c705d;background:#fff}
+.review-add-bar .primary{margin-left:auto;padding:6px 14px;background:#d29b3c;border-color:#d29b3c}
+.review-add-bar .primary:hover{background:#bf8a2f}
+.review-day h3{display:flex;align-items:baseline;gap:8px;margin:6px 0 6px;font-size:12px;font-weight:600;color:#65708a}
+.review-day h3 em{font-style:normal;font-size:9px;color:#fff;background:#d29b3c;border-radius:3px;padding:0 4px;line-height:14px}
+.review-day h3 span{margin-left:auto;font-size:10px;font-weight:400;color:#aab1bf}
+.review-view ol{list-style:none;margin:0;padding:0}
+.review-item{display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-bottom:1px solid #f2f0ea}
+.review-num{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:#a7742a;background:#fbefd9;margin-top:1px}
+.review-item p{flex:1;margin:0;font-size:13px;line-height:1.75;color:#4c5568;white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
+.review-item p small{margin-left:8px;font-size:10px;color:#b3b9c6}
+.review-item textarea{flex:1;border:1px solid #ecdcbf;border-radius:6px;padding:4px 8px;font-size:13px;line-height:1.75;color:#4c5568;resize:vertical;outline:none;background:#fffdf8}
+.review-delete{opacity:0;color:#c7a7a7}
+.review-item:hover .review-delete{opacity:1}
+.review-range{display:flex;align-items:center;gap:8px;padding:6px 0 4px;border-bottom:1px solid #f0e6d3}
+.review-range strong{font-size:14px;font-weight:600;color:#5d5548;min-width:150px;text-align:center}
+.review-range span{margin-left:auto;font-size:11px;color:#a69a86}
+.review-summary .review-item{padding:11px 4px}
