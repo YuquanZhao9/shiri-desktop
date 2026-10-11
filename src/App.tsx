@@ -50,6 +50,10 @@ function App() {
   const editorSurface = editorIntent !== null || cellEditorSurface;
   // 专属日记窗口（#journal?date=…），桌面日历上双击日记标记打开。
   const [journalSurface] = useState(() => window.location.hash.startsWith('#journal'));
+  // 快速记复盘的小窗口（#review-quick）。
+  const [reviewQuickSurface] = useState(() => window.location.hash==='#review-quick');
+  const [quickReview,setQuickReview]=useState('');
+  const quickReviewRef=useRef<HTMLTextAreaElement>(null);
   const [journalDate,setJournalDate]=useState(()=>{const match=/date=(\d{4}-\d{2}-\d{2})/.exec(window.location.hash);try{return match?(parseDate(match[1]),match[1]):todayKey();}catch{return todayKey();}});
   const [journalCount,setJournalCount]=useState(0);
   const [journalSaved,setJournalSaved]=useState('');
@@ -123,7 +127,7 @@ function App() {
   const canEdit=()=>readyRef.current&&loadedKeyRef.current===keyRef.current;
   const toast=useCallback((text:string)=>setMessage(text),[]);
 
-  useEffect(()=>{document.documentElement.classList.toggle('desktop-surface',desktopSurface);document.documentElement.classList.toggle('widget-preview',desktopSurface&&!window.desktop);document.documentElement.classList.toggle('editor-surface',editorSurface);document.documentElement.classList.toggle('journal-surface',journalSurface);return()=>{document.documentElement.classList.remove('desktop-surface','widget-preview','editor-surface','journal-surface');};},[desktopSurface,editorSurface,journalSurface]);
+  useEffect(()=>{document.documentElement.classList.toggle('desktop-surface',desktopSurface);document.documentElement.classList.toggle('widget-preview',desktopSurface&&!window.desktop);document.documentElement.classList.toggle('editor-surface',editorSurface);document.documentElement.classList.toggle('journal-surface',journalSurface||reviewQuickSurface);return()=>{document.documentElement.classList.remove('desktop-surface','widget-preview','editor-surface','journal-surface');};},[desktopSurface,editorSurface,journalSurface]);
   useEffect(()=>{
     const receive=(event:StorageEvent)=>{
       if(event.storageArea!==localStorage)return;
@@ -148,6 +152,7 @@ function App() {
 
   useEffect(()=>{const t=setInterval(()=>setToday(todayKey()),30000);return()=>clearInterval(t);},[]);
   useEffect(()=>{if(!journalSurface)return;document.title='昱时 · 日记';const off=window.desktop?.onJournalOpen?.(date=>{try{parseDate(date);journalFlush.current();setJournalDate(date);}catch{/* ignore */}});const leave=()=>journalFlush.current();window.addEventListener('pagehide',leave);window.addEventListener('beforeunload',leave);return()=>{off?.();window.removeEventListener('pagehide',leave);window.removeEventListener('beforeunload',leave);};},[journalSurface]);
+  useEffect(()=>{if(!reviewQuickSurface)return;document.title='昱时 · 记一条复盘';const focus=()=>requestAnimationFrame(()=>quickReviewRef.current?.focus());focus();const off=window.desktop?.onReviewQuickOpen?.(focus);window.addEventListener('focus',focus);return()=>{off?.();window.removeEventListener('focus',focus);};},[reviewQuickSurface]);
   // 管理窗口刚打开时，接上桌面日历点开日记的请求。
   useEffect(()=>{if(window.location.hash)return;try{const raw=localStorage.getItem(OPEN_JOURNAL_KEY);if(raw)openJournalRequest(raw);}catch{/* ignore */}},[]);
   
@@ -319,6 +324,8 @@ function App() {
   function saveTimetable(next:Timetable){if(!canEdit()){toast('数据还未载入，暂时无法编辑');return;}const candidate={...next,updatedAt:stamp()};try{validateTimetable(candidate);}catch(e){toast((e as Error).message);return;}setData(prev=>({...prev,timetable:candidate}));}
   function updateSlot(id:string,patch:Partial<TimetableSlot>){saveTimetable({...timetable,slots:timetable.slots.map(slot=>slot.id===id?{...slot,...patch}:slot)});}
   function saveJournal(date:string,text:string){if(!canEdit()){toast('数据还未载入，日记暂时无法保存');return;}setData(prev=>{const journal=writeJournal(prev.journal,date,text);return journal===prev.journal||(!prev.journal&&!journal.length)?prev:{...prev,journal};});}
+  // 小窗口里记一条：先直接写进本机存储（随后马上关窗口也不丢），再更新界面。
+  function addReviewNow(text:string){if(!canEdit()||!text.trim())return;const id=uid();try{const raw=localStorage.getItem(keyRef.current);if(raw){const stored=validateBackup(JSON.parse(raw));localStorage.setItem(keyRef.current,JSON.stringify({...stored,reflections:addReflection(stored.reflections,today,text,id)}));}}catch{/* 下面的正常保存兜底 */}setData(prev=>{if(prev.reflections?.some(item=>item.id===id))return prev;const reflections=addReflection(prev.reflections,today,text,id);return reflections===prev.reflections?prev:{...prev,reflections};});}
   function addReview(date:string,text:string){if(!canEdit()){toast('数据还未载入，暂时无法记录');return;}const id=uid();setData(prev=>{const reflections=addReflection(prev.reflections,date,text,id);return reflections===prev.reflections?prev:{...prev,reflections};});}
   function editReview(id:string,text:string){if(!canEdit())return;setData(prev=>{const reflections=editReflection(prev.reflections,id,text);return reflections===prev.reflections?prev:{...prev,reflections};});}
   function saveJournalNow(date:string,text:string){
@@ -445,6 +452,16 @@ function App() {
     {cellExpanded&&<><div className="inline-editor-fields"><label>日期<input type="date" aria-label="日期" value={edit.date} onChange={e=>setEdit({...edit,date:e.target.value})}/></label><label>时长<select aria-label="持续时长" disabled={!edit.time} value={edit.duration} onChange={e=>setEdit({...edit,duration:Number(e.target.value)})}>{[15,30,45,60,90,120,180,240,480].map(n=><option key={n} value={n}>{n<60?`${n} 分钟`:`${n/60} 小时`}</option>)}</select></label><label>重复<select aria-label="重复" value={edit.repeat} onChange={e=>setEdit({...edit,repeat:e.target.value as Task['repeat']})}>{Object.entries(REPEATS).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select></label><label>清单<select aria-label="所属清单" value={edit.listId} onChange={e=>setEdit({...edit,listId:e.target.value})}>{data.lists.map(list=><option key={list.id} value={list.id}>{list.name}</option>)}</select></label></div></>}
   </form>;
 
+  if(reviewQuickSurface){
+    const todays=activeReflections(data.reflections).filter(item=>item.date===today);
+    const submitQuick=()=>{if(!quickReview.trim())return;addReviewNow(quickReview);setQuickReview('');};
+    return <div className="review-quick">
+      <header><span><Lightbulb size={16}/>记一条复盘</span><small>{todays.length?`今天已记 ${todays.length} 条`:'今天还没记'}</small></header>
+      <textarea ref={quickReviewRef} autoFocus rows={3} value={quickReview} maxLength={5000} placeholder={'写下一条感悟，回车记下，可以接着写下一条\nShift+回车换行 · Esc 关闭'} onChange={e=>setQuickReview(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();void window.desktop?.closeEditor();return;}if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();submitQuick();}}}/>
+      {todays.length>0&&<ol start={Math.max(1,todays.length-2)}>{todays.slice(-3).map(item=><li key={item.id}>{item.text}</li>)}</ol>}
+      <footer><span>Ctrl+Alt+F 随时打开</span><button className="primary" disabled={!quickReview.trim()||!ready} onClick={submitQuick}>记下</button></footer>
+    </div>;
+  }
   if(journalSurface){
     const day=parseDate(journalDate);
     const tasks=tasksForDate(activeTasks,journalDate);
@@ -487,7 +504,7 @@ function App() {
       <div className="calendar-heading"><div><div className="eyebrow">A LITTLE SPACE FOR YOUR EVERYDAY</div><h1>{section==='review'?'复盘':section==='journal'?'日记':section==='inbox'?'收集箱':view==='day'?dateLabel(selected):`${month.getFullYear()} 年 ${month.getMonth()+1} 月`}<span className="month-en">{!isList&&view==='month'?month.toLocaleString('en',{month:'long'}):''}</span></h1><p>{section==='review'?'对一件事的感悟，回车就是一条；每周日把这一周的连起来看。':section==='journal'?'只属于你自己的每一天，按日期从近到远。':section==='inbox'?'先记下来，再为它找一个合适的时间。':view==='day'?'展开一天，让时间为重要的事留白。':'生活的大小事，都在这一页。'}</p></div><button className="today-button" onClick={goToday}><span/>回到今天</button></div>
       <div className="toolbar"><div className="toolbar-left"><div className="arrow-group"><button className="icon-button" aria-label="上一页" onClick={()=>navigate(-1)}><ChevronLeft size={18}/></button><button className="icon-button" aria-label="下一页" onClick={()=>navigate(1)}><ChevronRight size={18}/></button></div><span className="toolbar-date">{view==='day'?formatLunar(selected):`${month.getMonth()+1} 月 · ${month.getFullYear()}`}</span><span className="divider"/><button className={`text-button ${hideDone?'selected':''}`} onClick={()=>setHideDone(v=>!v)}><CheckCheck size={15}/>{hideDone?'已隐藏完成':'显示已完成'}</button></div><div className="toolbar-right"><div className="view-switch">{([['month','月历'],['day','时间表'],['list','清单']] as const).map(([value,label])=><button key={value} className={view===value&&section!=='inbox'?'active':''} onClick={()=>{setView(value);if(section==='inbox')setSection('calendar');}}>{label}</button>)}</div><button className="icon-button fullscreen-button" title="铺满屏幕" onClick={()=>void changeMode('fullscreen')}><Maximize2 size={16}/></button><button className="icon-button panel-toggle" title={panel?'收起当天安排':'打开当天安排'} onClick={()=>setPanel(v=>!v)}>{panel?<PanelRightClose size={18}/>:<PanelRightOpen size={18}/>}</button></div></div>
       </>}
-      {desktopSurface&&<header className="widget-heading"><div className="widget-month"><CalendarDays size={21}/><h1>{widgetSpan==='month'?<>{month.getFullYear()} 年 <strong>{month.getMonth()+1} 月</strong></>:<strong>{widgetRangeLabel}</strong>}</h1></div><div className="widget-controls"><button title="上一段" aria-label="上一段" onClick={()=>navigate(-1)}><ChevronLeft size={18}/></button><button onClick={goToday}>今天</button><button title="下一段" aria-label="下一段" onClick={()=>navigate(1)}><ChevronRight size={18}/></button><i/><div className="widget-span-switch" aria-label="显示范围">{([['week','一周'],['twoWeeks','两周'],['month','整月']] as const).map(([span,label])=><button key={span} className={widgetSpan===span?'active':''} onClick={()=>void changeWidgetSpan(span)}>{label}</button>)}</div><button onClick={()=>setTimetableVisible(!showTimetable)} className={showTimetable?'active':''} title="在日期格里显示或隐藏课表" aria-label="课表"><GraduationCap size={16}/></button><button onClick={()=>newTask(selected)} title="新建日程"><Plus size={16}/></button><button title="打开管理窗口" aria-label="打开管理窗口" onClick={()=>{if(window.desktop)void window.desktop.showWindow();else window.open(window.location.href.split('#')[0],'yushi-manager');}}><Settings size={17}/></button></div></header>}
+      {desktopSurface&&<header className="widget-heading"><div className="widget-month"><CalendarDays size={21}/><h1>{widgetSpan==='month'?<>{month.getFullYear()} 年 <strong>{month.getMonth()+1} 月</strong></>:<strong>{widgetRangeLabel}</strong>}</h1></div><div className="widget-controls"><button title="上一段" aria-label="上一段" onClick={()=>navigate(-1)}><ChevronLeft size={18}/></button><button onClick={goToday}>今天</button><button title="下一段" aria-label="下一段" onClick={()=>navigate(1)}><ChevronRight size={18}/></button><i/><div className="widget-span-switch" aria-label="显示范围">{([['week','一周'],['twoWeeks','两周'],['month','整月']] as const).map(([span,label])=><button key={span} className={widgetSpan===span?'active':''} onClick={()=>void changeWidgetSpan(span)}>{label}</button>)}</div><button onClick={()=>setTimetableVisible(!showTimetable)} className={showTimetable?'active':''} title="在日期格里显示或隐藏课表" aria-label="课表"><GraduationCap size={16}/></button><button onClick={()=>{if(window.desktop?.openReviewQuick)void window.desktop.openReviewQuick().then(result=>{if(!result.ok)toast(result.error||'复盘输入框打不开');});else{setSection('review');}}} title="记一条复盘（Ctrl+Alt+F）" aria-label="记一条复盘"><Lightbulb size={16}/></button><button onClick={()=>newTask(selected)} title="新建日程"><Plus size={16}/></button><button title="打开管理窗口" aria-label="打开管理窗口" onClick={()=>{if(window.desktop)void window.desktop.showWindow();else window.open(window.location.href.split('#')[0],'yushi-manager');}}><Settings size={17}/></button></div></header>}
       {!ready&&<div className="load-notice">正在载入你的安排…</div>}
       <div className="calendar-body">
       {section==='review'?<ReviewView reflections={data.reflections} today={today} initialMode={reviewMode} remind={reviewReminder} onAdd={addReview} onEdit={editReview}/>

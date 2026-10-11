@@ -45,6 +45,7 @@ let mainWindow = null;
 let desktopWindow = null;
 const editorWindows = new Set();
 let journalWindow = null;
+let reviewQuickWindow = null;
 // One focusable cell editor is created in advance and reused, so a double-click
 // only moves and reveals it instead of starting a new renderer each time.
 let cellEditorWindow = null;
@@ -526,6 +527,40 @@ async function openJournalWindow(date) {
   }
 }
 
+// 快速记复盘的小窗口：桌面日历按钮或 Ctrl+Alt+F 打开，回车记一条，Esc 关闭。
+async function openReviewQuick() {
+  if (reviewQuickWindow && !reviewQuickWindow.isDestroyed()) {
+    if (!smokeTest) { setCalendarInteractive(false); reviewQuickWindow.show(); reviewQuickWindow.focus(); }
+    reviewQuickWindow.webContents.send('desktop:review-quick-open');
+    return { ok: true, ...snapshot('editor') };
+  }
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 480, height = 300;
+  const quick = new BrowserWindow({
+    title: '昱时 · 记一条复盘',
+    width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + work.height * 0.22),
+    minWidth: 360, minHeight: 220, backgroundColor: '#fffaf0', alwaysOnTop: true, skipTaskbar: false,
+    show: false, autoHideMenuBar: true, minimizable: false, maximizable: false, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  reviewQuickWindow = quick;
+  editorWindows.add(quick);
+  quick.on('closed', () => { editorWindows.delete(quick); if (reviewQuickWindow === quick) reviewQuickWindow = null; });
+  secureContents(quick);
+  try {
+    await loadSurface(quick, 'review-quick');
+    if (!smokeTest) { setCalendarInteractive(false); quick.show(); quick.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    quick.destroy();
+    throw error;
+  }
+}
+
 function showNotification(value) {
   const options = validateNotification(value);
   if (smokeTest) return { ok: false, error: '隐藏测试环境禁止显示系统通知。' };
@@ -672,6 +707,7 @@ function registerIpc() {
   });
   handle('desktop:open-editor', (request) => openEditor(request));
   handle('desktop:open-journal', (date) => openJournalWindow(date));
+  handle('desktop:open-review-quick', () => openReviewQuick());
   ipcMain.handle('desktop:open-inline-editor', async (event, request) => {
     const testSurface = smokeTest && event.sender === mainWindow?.webContents && event.sender.getURL().endsWith('#desktop');
     if (!isTrustedFrame(event) || (event.sender !== desktopWindow?.webContents && !testSurface))
@@ -781,6 +817,7 @@ function refreshTrayMenu() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: process.platform === 'darwin' ? '打开管理窗口  ⌥⌘D' : '打开管理窗口  Ctrl+Alt+D', click: () => { void showWindow(); } },
+    { label: process.platform === 'darwin' ? '记一条复盘  ⌥⌘F' : '记一条复盘  Ctrl+Alt+F', click: () => { void openReviewQuick().catch(() => {}); } },
     { label: '常驻桌面（主屏）', type: 'checkbox', checked: mode === 'desktop', enabled: process.platform === 'win32', click: () => { void queueMode(mode === 'desktop' ? 'window' : 'desktop'); } },
     { type: 'separator' },
     { label: '退出昱时（停止提醒）', click: () => { void quitApplication(); } },
@@ -931,6 +968,8 @@ if (hasLock) {
       tray.setToolTip('昱时 · 日历与清单');
       tray.on('double-click', () => { void showWindow(); });
       shortcutRegistered = globalShortcut.register('CommandOrControl+Alt+D', () => { void showWindow(); });
+      // 随手记一条复盘；被别的软件占用时不影响其他功能。
+      try { globalShortcut.register('CommandOrControl+Alt+F', () => { void openReviewQuick().catch(() => {}); }); } catch { /* ignore */ }
       refreshTrayMenu();
       reminderTimer = setInterval(deliverReminders, 15_000);
       powerMonitor.on('resume', deliverReminders);

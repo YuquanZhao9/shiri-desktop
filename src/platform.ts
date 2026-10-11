@@ -30,6 +30,8 @@ declare global { interface Window { desktop?: {
   onPointerReset(cb:()=>void):()=>void;
   openJournalWindow?(date:string):Promise<{ok:boolean;error?:string}>;
   onJournalOpen?(cb:(date:string)=>void):()=>void;
+  openReviewQuick?():Promise<{ok:boolean;error?:string}>;
+  onReviewQuickOpen?(cb:()=>void):()=>void;
 } } }
 export const isNative = Capacitor.isNativePlatform();
 const pendingWrites = new Map<string, Promise<void>>();

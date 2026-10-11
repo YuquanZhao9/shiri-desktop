@@ -56,7 +56,7 @@ let application;
   assert.equal(renderer.invalidQueue.ok, false);
   assert.equal(renderer.require, 'undefined');
   assert.equal(renderer.nodeProcess, 'undefined');
-  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onJournalOpen', 'onModeChanged', 'onPointerReset', 'openEditor', 'openInlineEditor', 'openJournalWindow', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
+  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onJournalOpen', 'onModeChanged', 'onPointerReset', 'onReviewQuickOpen', 'openEditor', 'openInlineEditor', 'openJournalWindow', 'openReviewQuick', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
   await page.getByRole('button', { name: '时间表', exact: true }).click();
   await page.waitForSelector('.timeline', { state: 'attached' });
   await page.getByRole('button', { name: '月历', exact: true }).click();
@@ -200,6 +200,19 @@ let application;
   await journalPage.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
   await journalPage.close();
+  // The desktop calendar's 复盘 button opens the quick box; Enter saves one entry and keeps the box open.
+  const quickPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#review-quick'), timeout: 15000 });
+  await page.getByRole('button', { name: '记一条复盘' }).click();
+  const quickPage = await quickPagePromise;
+  await quickPage.waitForSelector('.review-quick textarea');
+  await quickPage.locator('.review-quick textarea').fill('smoke reflection');
+  await quickPage.locator('.review-quick textarea').press('Enter');
+  assert.equal(await quickPage.locator('.review-quick textarea').inputValue(), '');
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).reflections || []).some(item => item.text === 'smoke reflection'), null, { timeout: 5000 });
+  // Esc closes the box (the page goes away while the key press is still being reported).
+  const quickClosed = quickPage.waitForEvent('close', { timeout: 5000 });
+  await quickPage.locator('.review-quick textarea').press('Escape').catch(() => {});
+  await quickClosed;
   await application.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith('#desktop'));
     window.setMinimumSize(560, 240);
