@@ -8,7 +8,7 @@ import type { AgendaItem } from './timetable';
 import { todayKey, dateKey, parseDate, addDays, monthDays, occursOn, isDone, toggleTask, moveTask, tasksForDate, formatLunar, validateBackup, defaultData, mergeTasks, TASK_COLORS } from './core';
 import { createCloudClient, syncTasks, listsForTasks, cloudErrorMessage, requestPasswordReset, signIn, signUp, updatePassword } from './cloud';
 import { applyRemoteLists, subscribeLive, syncJournal, syncLists, syncTimetable } from './live-sync';
-import { hasJournal, journalText, JOURNAL_MAX_TEXT, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from './journal';
+import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from './journal';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from './ai-token';
 import type { AiTokenInfo } from './ai-token';
 import { readSaved, writeSaved, scheduleNative, enableNotifications, reminderQueue, isNative, MULTI_REMINDER_LEADS, leadLabel } from './platform';
@@ -495,7 +495,7 @@ function App() {
     {!desktopSurface&&!cellEditorSurface&&panel&&<aside className="day-panel"><div className="panel-title"><span><Sun size={16}/> {selected===today?'今天的安排':'当天安排'}</span><button className="icon-button" title="收起面板" onClick={()=>setPanel(false)}><PanelRightClose size={17}/></button></div><div className="selected-date"><span>{parseDate(selected).getDate()}</span><div><strong>{parseDate(selected).toLocaleDateString('zh-CN',{weekday:'long'})}</strong><small>{parseDate(selected).getFullYear()} 年 {parseDate(selected).getMonth()+1} 月 · {formatLunar(selected)}</small></div><button className="icon-button" title="展开小时日程" onClick={()=>{setView('day');setSection('calendar');}}><ArrowUpRight size={19}/></button></div><button className="expand-timeline" onClick={()=>{setView(view==='day'?'month':'day');setSection('calendar');}}><Clock3 size={16}/>{view==='day'?'返回月历':'展开 24 小时时间表'}<ChevronRight size={15}/></button>
       <div className="day-summary"><div><strong>{dayTasks.length}</strong><span>项安排</span></div><div><strong>{dayTasks.filter(t=>isDone(t,selected)).length}</strong><span>已完成</span></div><div><strong>{Math.round(dayTasks.filter(t=>t.time).reduce((n,t)=>n+t.duration,0)/60*10)/10}<small>h</small></strong><span>计划用时</span></div></div>
       <div className="panel-section-title">日程与待办 <button className="icon-button" title="添加当天日程" onClick={()=>newTask(selected)}><Plus size={16}/></button></div><div className="panel-tasks">{dayTasks.map(task=>taskRow(task,selected))}{!dayTasks.length&&<div className="empty-day"><div className="empty-day-icon"><Sun size={28}/></div><h3>{query?'没有匹配的安排':'今天，留白也很好'}</h3><p>把重要的事记在这里，<br/>剩下的时间，交给生活。</p><button onClick={()=>newTask(selected)}><Plus size={14}/> 添加第一项安排</button></div>}</div><form className="panel-quick" onSubmit={quickAdd}><Plus size={16}/><input aria-label="添加当天待办" placeholder="添加一个待办…" value={quick} onChange={e=>setQuick(e.target.value)}/></form>
-      <div className="panel-section-title"><span className="journal-title"><BookOpen size={13}/>日记{hasJournal(data.journal,selected)?<em className="journal-state done">已完成</em>:selected===today?<em className="journal-state">未写</em>:null}</span><span className="journal-tools">{journalText(data.journal,selected).trim()&&<small className="journal-count">{journalText(data.journal,selected).trim().length} 字</small>}{window.desktop&&<button className="icon-button" title="在日记本里打开（大窗口）" aria-label="在日记本里打开" onClick={()=>openJournalWindow(selected)}><Maximize2 size={13}/></button>}</span></div>
+      <div className="panel-section-title"><span className="journal-title"><BookOpen size={13}/>日记{hasJournal(data.journal,selected)?<em className="journal-state done">已完成</em>:selected===today?<em className="journal-state">未写</em>:null}</span><span className="journal-tools">{journalText(data.journal,selected).trim()&&<small className="journal-count">{journalLength(journalText(data.journal,selected))} 字</small>}{window.desktop&&<button className="icon-button" title="在日记本里打开（大窗口）" aria-label="在日记本里打开" onClick={()=>openJournalWindow(selected)}><Maximize2 size={13}/></button>}</span></div>
       <JournalEditor key={`${storageKey}:${selected}`} date={selected} text={journalText(data.journal,selected)} focus={journalFocus} onSave={saveJournal}/>
       {!activeTasks.length&&<div className="welcome-card"><span>HELLO, NEW DAY</span><h3>从一个小计划开始</h3><p>还没想好记什么？试试示例安排，感受一下昱时的节奏。</p><button onClick={loadExamples}>看看示例 <ArrowUpRight size={14}/></button></div>}
       <div className="panel-bottom"><span className="status-dot"/>{user?syncState:'所有改动保存在本机'}<button title="备份与云同步" onClick={()=>setSettings(true)}><Cloud size={15}/></button></div></aside>}
@@ -525,19 +525,20 @@ function App() {
 
 /** 当天日记：边写边存（停顿片刻或离开输入框时保存），切换日期也会先存好。 */
 function JournalEditor({date,text,focus,onSave,onCount,flushRef,className='journal-editor',placeholder='写点这一天的事、心情或想法…（自动保存，只有你能看到）'}:{date:string;text:string;focus:number;onSave:(date:string,text:string)=>void;onCount?:(count:number)=>void;flushRef?:React.MutableRefObject<()=>void>;className?:string;placeholder?:string}){
-  const [draft,setDraft]=useState(text);
+  const [draft,setDraft]=useState(()=>spaceParagraphs(text));
   const pending=useRef<string|null>(null);
   const save=useRef(onSave);save.current=onSave;
   const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const box=useRef<HTMLTextAreaElement>(null);
   const flush=useCallback(()=>{clearTimeout(timer.current);if(pending.current!==null){const value=pending.current;pending.current=null;save.current(date,value);}},[date]);
-  useEffect(()=>{if(pending.current===null)setDraft(text);},[text]);
+  useEffect(()=>{if(pending.current===null)setDraft(spaceParagraphs(text));},[text]);
   useEffect(()=>flush,[flush]);
   useEffect(()=>{if(flushRef)flushRef.current=flush;},[flush,flushRef]);
-  useEffect(()=>{onCount?.(draft.trim().length);},[draft,onCount]);
+  useEffect(()=>{onCount?.(journalLength(draft));},[draft,onCount]);
+  const change=(value:string)=>{setDraft(value);pending.current=value;clearTimeout(timer.current);timer.current=setTimeout(flush,700);};
   const lastFocus=useRef(0);
   useEffect(()=>{if(focus&&focus!==lastFocus.current){lastFocus.current=focus;const element=box.current;if(element){element.focus();element.setSelectionRange(element.value.length,element.value.length);element.scrollIntoView({block:'nearest'});}}},[focus]);
-  return <textarea ref={box} className={className} aria-label={`${date} 的日记`} placeholder={placeholder} maxLength={JOURNAL_MAX_TEXT} value={draft} onChange={e=>{setDraft(e.target.value);pending.current=e.target.value;clearTimeout(timer.current);timer.current=setTimeout(flush,700);}} onBlur={flush}/>;
+  return <textarea ref={box} className={className} aria-label={`${date} 的日记`} placeholder={placeholder} maxLength={JOURNAL_MAX_TEXT} value={draft} onKeyDown={e=>handleParagraphEnter({key:e.key,shiftKey:e.shiftKey,isComposing:e.nativeEvent.isComposing,keyCode:e.keyCode,preventDefault:()=>e.preventDefault(),currentTarget:e.currentTarget},change)} onChange={e=>change(e.target.value)} onBlur={flush}/>;
 }
 
 function JournalList({journal,today,onOpen}:{journal:AppData['journal'];today:string;onOpen:(date:string)=>void}){

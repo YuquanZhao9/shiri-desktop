@@ -90,3 +90,37 @@ export function journalReminders(journal: JournalEntry[] | undefined, days = 7, 
   }
   return result;
 }
+
+/**
+ * 段落之间空一行横线：不缩进也能一眼分清段落。
+ * 单个换行（旧日记或别处粘贴来的）显示成段落间隔；只在用户改动后才按新格式保存。
+ */
+export function spaceParagraphs(text: string): string {
+  return text.replace(/\r\n?/g, '\n').replace(/([^\n])\n(?=[^\n])/g, '$1\n\n');
+}
+
+/** 回车分段：插入段落间隔（已在空行上时只补一个换行），返回新文本和光标位置。 */
+export function paragraphBreak(text: string, start: number, end: number): { text: string; caret: number } {
+  const before = text.slice(0, start).replace(/[ \t]+$/, '');
+  const after = text.slice(end).replace(/^[ \t]+/, '');
+  const insert = !before || before.endsWith('\n\n') ? '\n' : before.endsWith('\n') ? '\n' : '\n\n';
+  return { text: before + insert + after, caret: before.length + insert.length };
+}
+
+/** 文本框里的回车：段落之间自动空一行（输入法正在选字时不处理）。保留撤销记录。 */
+export function handleParagraphEnter(event: { key: string; shiftKey: boolean; isComposing?: boolean; keyCode?: number; preventDefault(): void; currentTarget: HTMLTextAreaElement }, onFallback: (text: string) => void): void {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  const box = event.currentTarget;
+  const next = paragraphBreak(box.value, box.selectionStart, box.selectionEnd);
+  const before = box.value.slice(0, box.selectionStart);
+  const insert = !before || before.endsWith('\n') ? '\n' : '\n\n';
+  if (typeof document !== 'undefined' && document.execCommand?.('insertText', false, insert)) return;
+  onFallback(next.text);
+  requestAnimationFrame(() => box.setSelectionRange(next.caret, next.caret));
+}
+
+/** 字数：不算空格和换行。 */
+export function journalLength(text: string): number {
+  return text.replace(/\s/g, '').length;
+}

@@ -59,3 +59,12 @@ test('21:00 日记提醒：没写才提醒，已过的不提醒', () => {
   assert.deepEqual(journalReminders(written, 2, now).map(i => i.id), ['journal:2026-10-12']);
   assert.deepEqual(journalReminders([], 1, new Date(2026, 9, 11, 21, 30).getTime()), []);
 });
+
+test('段落间空一行：旧日记显示时隔开，回车自动空行', async () => {
+  const { paragraphBreak, spaceParagraphs } = await import('../src/journal');
+  assert.equal(spaceParagraphs('第一段\n第二段\n\n第三段'), '第一段\n\n第二段\n\n第三段');
+  assert.equal(spaceParagraphs('一\r\n二'), '一\n\n二');
+  assert.deepEqual(paragraphBreak('第一段', 3, 3), { text: '第一段\n\n', caret: 5 });
+  assert.deepEqual(paragraphBreak('第一段\n\n', 5, 5), { text: '第一段\n\n\n', caret: 6 });
+  assert.deepEqual(paragraphBreak('前半后半', 2, 2), { text: '前半\n\n后半', caret: 4 });
+});

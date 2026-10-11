@@ -10,7 +10,7 @@ import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_RED
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
 import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncTimetable } from './sync';
-import { hasJournal, journalText, JOURNAL_MAX_TEXT, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
+import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
 import type { AiTokenInfo } from '@shared/ai-token';
@@ -546,13 +546,14 @@ function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task;
 
 /** 一天的日记：全屏输入，边写边存，点“完成”或关掉都会保存。 */
 function JournalSheet({ date, text, onSave, onClose }: { date: string; text: string; onSave: (date: string, text: string) => void; onClose: () => void }) {
-  const [draft, setDraft] = useState(text);
+  const [draft, setDraft] = useState(() => spaceParagraphs(text));
   const pending = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const save = useRef(onSave); save.current = onSave;
   const flush = useCallback(() => { clearTimeout(timer.current); if (pending.current !== null) { const value = pending.current; pending.current = null; save.current(date, value); } }, [date]);
-  useEffect(() => { if (pending.current === null) setDraft(text); }, [text]);
+  useEffect(() => { if (pending.current === null) setDraft(spaceParagraphs(text)); }, [text]);
   useEffect(() => flush, [flush]);
+  const change = (value: string) => { setDraft(value); pending.current = value; clearTimeout(timer.current); timer.current = setTimeout(flush, 800); };
   const close = () => { flush(); onClose(); };
   return (
     <div className="sheet-layer journal-layer" onClick={close}>
@@ -566,8 +567,8 @@ function JournalSheet({ date, text, onSave, onClose }: { date: string; text: str
           <span className="journal-day">{parseDate(date).getDate()}</span>
           <span><b>{parseDate(date).getFullYear()} 年 {parseDate(date).getMonth() + 1} 月 · {parseDate(date).toLocaleDateString('zh-CN', { weekday: 'long' })}</b><small>{festivalName(date) || `农历${formatLunar(date)}`}{date === todayKey() ? ' · 今天' : ''}</small></span>
         </div>
-        <textarea className="journal-text" value={draft} autoFocus={!text} maxLength={JOURNAL_MAX_TEXT} placeholder={'今天过得怎么样？\n写下发生的事、心情，或者一句想对自己说的话。'} onChange={e => { setDraft(e.target.value); pending.current = e.target.value; clearTimeout(timer.current); timer.current = setTimeout(flush, 800); }} onBlur={flush} />
-        <p className="journal-foot">{draft.trim() ? `${draft.trim().length} 字 · 自动保存 · 只有你能看到` : '空白的日记不会保存'}</p>
+        <textarea className="journal-text" value={draft} autoFocus={!text} maxLength={JOURNAL_MAX_TEXT} placeholder={'今天过得怎么样？\n写下发生的事、心情，或者一句想对自己说的话。'} onKeyDown={e => handleParagraphEnter({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode, preventDefault: () => e.preventDefault(), currentTarget: e.currentTarget }, change)} onChange={e => change(e.target.value)} onBlur={flush} />
+        <p className="journal-foot">{draft.trim() ? `${journalLength(draft)} 字 · 自动保存 · 只有你能看到` : '空白的日记不会保存'}</p>
       </div>
     </div>
   );
