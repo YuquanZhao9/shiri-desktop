@@ -14,6 +14,9 @@ import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME }
 import { Review } from './Review';
 import { WeeklyCard, WeeklySheet } from './Weekly';
 import type { WeeklyActions } from './Weekly';
+import { ClassSheet, ReviewClassCard } from './Classes';
+import { CLASS_STATUS_LABEL, classMarkFor, classState, setClassMark } from '@shared/classes';
+import type { ClassStatus } from '@shared/types';
 import { addMark, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, marksOn, mergeItems, removeMark, saveGoal as saveGoalItem, setMarkDone } from '@shared/weekly';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
@@ -75,6 +78,7 @@ export default function App() {
   const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
   const [goalReminder, setGoalReminder] = useState(() => pref('shiri-goal-reminder', '1') !== '0');
   const [weeklyOpen, setWeeklyOpen] = useState(false);
+  const [classOpen, setClassOpen] = useState<{ slotId: string; title: string; time: string; end: string; date: string } | null>(null);
   const [notebook, setNotebook] = useState<'journal' | 'review'>(() => location.hash === '#review' ? 'review' : 'journal');
   const [reviewMode, setReviewMode] = useState<'day' | 'week' | 'month'>(() => location.hash === '#review' ? 'week' : 'day');
 
@@ -152,9 +156,9 @@ export default function App() {
       if (timetable && keyRef.current === key) {
         setData(prev => prev.timetable && prev.timetable.updatedAt > timetable.updatedAt || JSON.stringify(prev.timetable) === JSON.stringify(timetable) ? prev : { ...prev, timetable });
       }
-      const weekly = await syncWeekly(client, owner.id, dataRef.current.goals, dataRef.current.goalMarks);
+      const weekly = await syncWeekly(client, owner.id, dataRef.current.goals, dataRef.current.goalMarks, dataRef.current.classMarks);
       if (weekly && keyRef.current === key) {
-        setData(prev => { const goals = mergeItems(prev.goals, weekly.goals), goalMarks = mergeItems(prev.goalMarks, weekly.marks); return JSON.stringify(goals) === JSON.stringify(mergeItems(prev.goals)) && JSON.stringify(goalMarks) === JSON.stringify(mergeItems(prev.goalMarks)) ? prev : { ...prev, goals, goalMarks }; });
+        setData(prev => { const goals = mergeItems(prev.goals, weekly.goals), goalMarks = mergeItems(prev.goalMarks, weekly.marks), classMarks = mergeItems(prev.classMarks, weekly.classMarks); return JSON.stringify(goals) === JSON.stringify(mergeItems(prev.goals)) && JSON.stringify(goalMarks) === JSON.stringify(mergeItems(prev.goalMarks)) && JSON.stringify(classMarks) === JSON.stringify(mergeItems(prev.classMarks)) ? prev : { ...prev, goals, goalMarks, classMarks }; });
       }
       const reflections = await syncReflections(client, owner.id, dataRef.current.reflections);
       if (reflections && keyRef.current === key) {
@@ -239,6 +243,10 @@ export default function App() {
     if (!ready) return;
     setData(prev => { const journal = writeJournal(prev.journal, date, text); return journal === prev.journal || (!prev.journal && !journal.length) ? prev : { ...prev, journal }; });
   }
+  function setClassStatus(slot: { id: string; title: string }, date: string, status: ClassStatus, note?: string) {
+    if (!ready) return;
+    setData(prev => { const classMarks = setClassMark(prev.classMarks, slot, date, status, note); return classMarks === prev.classMarks ? prev : { ...prev, classMarks }; });
+  }
   const weeklyActions: WeeklyActions = {
     saveGoal: goal => { if (!ready) return; const id = goal.id || uid(); setData(prev => { const goals = saveGoalItem(prev.goals, { ...goal, id }); return goals === prev.goals ? prev : { ...prev, goals }; }); },
     deleteGoal: id => { if (ready) setData(prev => ({ ...prev, goals: deleteGoalItem(prev.goals, id) })); },
@@ -320,15 +328,20 @@ export default function App() {
   // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
   const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'task'
     ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
-    : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR, ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
+    : <span key={`class-${item.slot.id}`} className={`pill class status-${classState(classMarkFor(data.classMarks, item.slot.id, date), date, item.slot.end)}${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR, ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
 
   // 课程和日程排在同一列表里，统一用课程色。
-  const classRow = (slot: DayClass) => (
-    <li key={`class-${slot.id}`} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>
-      <span className="class-time">{slot.start}<br />{slot.end}</span>
-      <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
-    </li>
-  );
+  const classRow = (slot: DayClass) => {
+    const mark = classMarkFor(data.classMarks, slot.id, selected);
+    const state = classState(mark, selected, slot.end);
+    return (
+      <li key={`class-${slot.id}`} className={`class-row status-${state}${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties} onClick={() => setClassOpen({ slotId: slot.id, title: slot.title, time: `${slot.start}–${slot.end}`, end: slot.end, date: selected })}>
+        <span className="class-time">{slot.start}<br />{slot.end}</span>
+        <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{mark?.note && <small className="class-note">{mark.note}</small>}{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
+        {state !== 'upcoming' && <span className={`class-badge status-${state}`}>{CLASS_STATUS_LABEL[state]}</span>}
+      </li>
+    );
+  };
   const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
 
   const calendar = (
@@ -445,6 +458,7 @@ export default function App() {
         {tab === 'calendar' && calendar}
         {tab === 'list' && listPage}
         {tab === 'journal' && journalPage}
+        {tab === 'timetable' && <ReviewClassCard marks={data.classMarks} onDone={mark => setClassStatus({ id: mark.slotId, title: mark.title }, mark.date, 'done')} onOpen={mark => { const slot = timetable.slots.find(s => s.id === mark.slotId); setClassOpen({ slotId: mark.slotId, title: mark.title, time: slot ? `${slot.start}–${slot.end}` : '', end: slot?.end ?? '00:00', date: mark.date }); }} />}
         {tab === 'timetable' && <TimetablePage timetable={timetable} today={today} visible={showTimetable} onVisible={value => { setShowTimetable(value); setPref('shiri-timetable', value ? '1' : '0'); }} />}
         {tab === 'me' && (
           <MePage
@@ -507,6 +521,7 @@ export default function App() {
         <TabButton on={tab === 'me'} onClick={() => setTab('me')} icon={<UserRound size={22} />} label="我的" badge={!user && !!config} />
       </nav>
 
+      {classOpen && <ClassSheet key={`${classOpen.slotId}:${classOpen.date}`} title={classOpen.title} time={classOpen.time} date={classOpen.date} mark={classMarkFor(data.classMarks, classOpen.slotId, classOpen.date)} state={classState(classMarkFor(data.classMarks, classOpen.slotId, classOpen.date), classOpen.date, classOpen.end)} onSave={(status, note) => setClassStatus({ id: classOpen.slotId, title: classOpen.title }, classOpen.date, status, note)} onClose={() => setClassOpen(null)} />}
       {weeklyOpen && <WeeklySheet goals={data.goals} marks={data.goalMarks} today={today} onClose={() => setWeeklyOpen(false)} actions={weeklyActions} />}
       {journalDate && <JournalSheet key={journalDate} date={journalDate} text={journalText(data.journal, journalDate)} onSave={saveJournal} onClose={() => setJournalDate(null)} />}
       {editing && <Editor key={editing.task.id} task={editing.task} isNew={editing.isNew} lists={lists} onSave={save} onDelete={remove} onClose={() => setEditing(null)} />}

@@ -2,7 +2,8 @@ import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import type { JournalEntry, Reflection, TaskList, Timetable } from './types';
 import { mergeReflections, newerReflection, validateReflection } from './reflections';
 import { mergeItems, newerItem, validateGoal, validateMark } from './weekly';
-import type { GoalMark, WeeklyGoal } from './types';
+import type { ClassMark, GoalMark, WeeklyGoal } from './types';
+import { validateClassMark } from './classes';
 import { validateTimetable } from './timetable';
 import { mergeJournal, newerEntry, validateJournalEntry } from './journal';
 
@@ -128,13 +129,13 @@ export async function syncReflections(client: SupabaseClient, userId: string, lo
  * 周次任务同步：任务和打卡都放在 shiri_weekly 表，每条一行（kind = goal / mark），较新的为准。
  * 云端没建表（schema-v7.sql）或读取失败时返回 null。
  */
-export async function syncWeekly(client: SupabaseClient, userId: string, goals: WeeklyGoal[] = [], marks: GoalMark[] = []): Promise<{ goals: WeeklyGoal[]; marks: GoalMark[] } | null> {
-  const remoteGoals: WeeklyGoal[] = [], remoteMarks: GoalMark[] = [];
+export async function syncWeekly(client: SupabaseClient, userId: string, goals: WeeklyGoal[] = [], marks: GoalMark[] = [], classMarks: ClassMark[] = []): Promise<{ goals: WeeklyGoal[]; marks: GoalMark[]; classMarks: ClassMark[] } | null> {
+  const remoteGoals: WeeklyGoal[] = [], remoteMarks: GoalMark[] = [], remoteClasses: ClassMark[] = [];
   for (let start = 0; ; start += 500) {
     const { data, error } = await client.from('shiri_weekly').select('kind,payload').eq('user_id', userId).order('id').range(start, start + 499);
     if (error) return null;
     for (const row of (data || []) as { kind: string; payload: unknown }[]) {
-      try { if (row.kind === 'goal') remoteGoals.push(validateGoal(row.payload)); else remoteMarks.push(validateMark(row.payload)); } catch { /* 跳过损坏的一行 */ }
+      try { if (row.kind === 'goal') remoteGoals.push(validateGoal(row.payload)); else if (row.kind === 'class') remoteClasses.push(validateClassMark(row.payload)); else remoteMarks.push(validateMark(row.payload)); } catch { /* 跳过损坏的一行 */ }
     }
     if (!data || data.length < 500) break;
   }
@@ -142,12 +143,12 @@ export async function syncWeekly(client: SupabaseClient, userId: string, goals: 
     const byId = new Map(remote.map(item => [item.id, item]));
     return local.filter(item => { const other = byId.get(item.id); return !other || newerItem(item, other) === item && JSON.stringify(item) !== JSON.stringify(other); });
   };
-  const push = [...newer(goals, remoteGoals).map(item => ({ kind: 'goal', item })), ...newer(marks, remoteMarks).map(item => ({ kind: 'mark', item }))];
+  const push = [...newer(goals, remoteGoals).map(item => ({ kind: 'goal', item })), ...newer(marks, remoteMarks).map(item => ({ kind: 'mark', item })), ...newer(classMarks, remoteClasses).map(item => ({ kind: 'class', item }))];
   for (let start = 0; start < push.length; start += 200) {
     const { error } = await client.rpc('merge_weekly', { incoming: push.slice(start, start + 200), expected_user: userId });
     if (error) return null;
   }
-  return { goals: mergeItems(goals, remoteGoals), marks: mergeItems(marks, remoteMarks) };
+  return { goals: mergeItems(goals, remoteGoals), marks: mergeItems(marks, remoteMarks), classMarks: mergeItems(classMarks, remoteClasses) };
 }
 
 export function reflectionsToPush(local: Reflection[], remote: Reflection[]): Reflection[] {

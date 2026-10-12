@@ -46,6 +46,7 @@ let desktopWindow = null;
 const editorWindows = new Set();
 let journalWindow = null;
 let reviewQuickWindow = null;
+let classEditorWindow = null;
 // One focusable cell editor is created in advance and reused, so a double-click
 // only moves and reveals it instead of starting a new renderer each time.
 let cellEditorWindow = null;
@@ -561,6 +562,43 @@ async function openReviewQuick() {
   }
 }
 
+// 一节课的状态和备注：桌面日历上双击课程打开的小窗口（只开一个，再双击别的课就换过去）。
+async function openClassEditor(request) {
+  if (!request || typeof request !== 'object' || typeof request.slotId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.slotId)
+      || typeof request.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(request.date)) throw new Error('课程信息无效。');
+  const hash = `class?slot=${request.slotId}&date=${request.date}`;
+  if (classEditorWindow && !classEditorWindow.isDestroyed()) {
+    await loadSurface(classEditorWindow, hash);
+    if (!smokeTest) { setCalendarInteractive(false); classEditorWindow.show(); classEditorWindow.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  }
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 420, height = 330;
+  const editor = new BrowserWindow({
+    title: '昱时 · 这节课',
+    width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + work.height * 0.22),
+    minWidth: 360, minHeight: 280, backgroundColor: '#f6fbfa', alwaysOnTop: true,
+    show: false, autoHideMenuBar: true, minimizable: false, maximizable: false, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  classEditorWindow = editor;
+  editorWindows.add(editor);
+  editor.on('closed', () => { editorWindows.delete(editor); if (classEditorWindow === editor) classEditorWindow = null; });
+  secureContents(editor);
+  try {
+    await loadSurface(editor, hash);
+    if (!smokeTest) { setCalendarInteractive(false); editor.show(); editor.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    editor.destroy();
+    throw error;
+  }
+}
+
 function showNotification(value) {
   const options = validateNotification(value);
   if (smokeTest) return { ok: false, error: '隐藏测试环境禁止显示系统通知。' };
@@ -708,6 +746,7 @@ function registerIpc() {
   handle('desktop:open-editor', (request) => openEditor(request));
   handle('desktop:open-journal', (date) => openJournalWindow(date));
   handle('desktop:open-review-quick', () => openReviewQuick());
+  handle('desktop:open-class-editor', (request) => openClassEditor(request));
   ipcMain.handle('desktop:open-inline-editor', async (event, request) => {
     const testSurface = smokeTest && event.sender === mainWindow?.webContents && event.sender.getURL().endsWith('#desktop');
     if (!isTrustedFrame(event) || (event.sender !== desktopWindow?.webContents && !testSurface))

@@ -33,6 +33,7 @@ declare global { interface Window { desktop?: {
   openJournalWindow?(date:string):Promise<{ok:boolean;error?:string}>;
   onJournalOpen?(cb:(date:string)=>void):()=>void;
   openReviewQuick?():Promise<{ok:boolean;error?:string}>;
+  openClassEditor?(request:{slotId:string;date:string}):Promise<{ok:boolean;error?:string}>;
   onReviewQuickOpen?(cb:()=>void):()=>void;
 } } }
 export const isNative = Capacitor.isNativePlatform();

@@ -127,3 +127,25 @@ test('周次任务：四格选三格完成、达标、撤销、安排、历史�
   assert.equal(backup.goals?.length, 2);
   assert.equal(w.activeGoals(w.deleteGoal(goals, 'de')).length, 1);
 });
+
+test('课程状态：已下课默认已上、单击循环、备注、待复习清单、合并', async () => {
+  const c = await import('../src/classes');
+  const w = await import('../src/weekly');
+  const now = new Date(2026, 9, 14, 12).getTime();
+  assert.equal(c.classState(undefined, '2026-10-12', '09:30', now), 'done');
+  assert.equal(c.classState(undefined, '2026-10-15', '09:30', now), 'upcoming');
+  assert.deepEqual(['upcoming', 'done', 'review', 'todo'].map(s => c.nextClassState(s as never)), ['done', 'review', 'todo', 'done']);
+  const slot = { id: 'slot-am', title: 'AM 讲课' };
+  let marks = c.setClassMark(undefined, slot, '2026-10-12', 'review', '第 3 章例题', now);
+  assert.equal(c.classState(c.classMarkFor(marks, 'slot-am', '2026-10-12'), '2026-10-12', '09:30', now), 'review');
+  assert.deepEqual(c.reviewClasses(marks).map(m => [m.title, m.note]), [['AM 讲课', '第 3 章例题']]);
+  const later = c.setClassMark(marks, slot, '2026-10-12', 'done', undefined, now - 1000);
+  assert.equal(later[0].note, '第 3 章例题', '只改状态时保留备注');
+  assert.ok(later[0].updatedAt > marks[0].updatedAt);
+  assert.equal(c.setClassMark(later, slot, '2026-10-12', 'done', undefined, now), later);
+  assert.deepEqual(c.reviewClasses(later), []);
+  assert.deepEqual(w.mergeItems(marks, later), w.mergeItems(later, marks));
+  assert.equal(w.mergeItems(marks, later)[0].status, 'done');
+  assert.deepEqual(validateBackup({ ...defaultData(), classMarks: later }).classMarks, later);
+  assert.throws(() => c.validateClassMark({ ...later[0], status: 'skip' }));
+});

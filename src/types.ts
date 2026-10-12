@@ -118,6 +118,23 @@ export interface GoalMark {
   deletedAt?: string;
 }
 
+/** 已上 / 未上 / 待复习. */
+export type ClassStatus = 'done' | 'todo' | 'review';
+
+/** Status and note of one class on one date (a timetable slot's occurrence). */
+export interface ClassMark {
+  id: string;
+  slotId: string;
+  date: string;
+  /** Course title when it was marked, so the review list still reads well if the timetable changes. */
+  title: string;
+  status: ClassStatus;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
 export interface AppData {
   version: 1;
   tasks: Task[];
@@ -131,4 +148,6 @@ export interface AppData {
   /** Weekly-quota tasks and their sessions; absent until the first one. */
   goals?: WeeklyGoal[];
   goalMarks?: GoalMark[];
+  /** Per-date class status (已上 / 未上 / 待复习) and notes. */
+  classMarks?: ClassMark[];
 }
