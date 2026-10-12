@@ -7,7 +7,8 @@ import type { ClassState } from './classes';
 import type { DayClass } from './timetable';
 
 const dayLabel = (key: string) => new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' }).format(parseDate(key));
-export const STATE_TAG: Record<ClassState, string> = { done: '✓', todo: '未', review: '复', upcoming: '' };
+// 未上和还没上的课看起来和普通课程一样，不加标记。
+export const STATE_TAG: Record<ClassState, string> = { done: '✓', todo: '', review: '复', upcoming: '' };
 const STATE_TEXT: Record<ClassState, string> = { ...CLASS_STATUS_LABEL, upcoming: '还没上' };
 
 /** 一节课的编辑：选状态、写一句备注。 */

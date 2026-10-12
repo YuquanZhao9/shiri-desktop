@@ -68,3 +68,6 @@ export function setClassMark(marks: ClassMark[] | undefined, slot: { id: string;
 export function reviewClasses(marks: ClassMark[] | undefined): ClassMark[] {
   return (marks ?? []).filter(mark => !mark.deletedAt && mark.status === 'review').sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
 }
+
+/** 三种颜色：没上（和还没到的）用原来的课程色，已上灰蓝，待复习琥珀色。 */
+export const CLASS_STATE_COLOR: Record<ClassState, string> = { upcoming: '#2A9D8F', todo: '#2A9D8F', done: '#6F7FA0', review: '#E39A2D' };

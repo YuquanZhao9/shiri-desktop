@@ -158,24 +158,18 @@
 .goal-colors button{width:16px;height:16px;border-radius:50%;padding:0;background:var(--goal)}
 .goal-colors button.on{box-shadow:0 0 0 2px #fff,0 0 0 3.5px var(--goal)}
 
-/* 课程状态：已上（淡）/ 未上（划掉）/ 待复习（琥珀色） */
+/* 课程状态三种颜色（颜色在 src/classes.ts CLASS_STATE_COLOR）：没上=原课程色，已上=灰蓝，待复习=琥珀 */
 .calendar-event.class-event{cursor:pointer}
-.calendar-event.class-event.status-done{opacity:.55}
-.calendar-event.class-event.status-todo span{text-decoration:line-through}
-.calendar-event.class-event.status-todo{opacity:.7}
-.calendar-event.class-event.status-review{box-shadow:inset 0 0 0 2px #f2a93b}
 .calendar-event.class-event b.class-state{flex:none;font-size:9px;line-height:13px;padding:0 3px;border-radius:3px;color:#fff;background:#ffffff40}
-.calendar-event.class-event b.class-state.status-review{background:#f2a93b;color:#fff}
-.calendar-event.class-event b.class-state.status-todo{background:#0000002e}
 .class-editor{display:flex;flex-direction:column;gap:12px;padding:18px}
 .class-editor header{display:flex;align-items:center;gap:10px;color:#2a9d8f}
 .class-editor header strong{display:block;font-size:15px;color:#33415a}
 .class-editor header small{display:block;margin-top:3px;font-size:11px;color:#8e98ad}
 .class-status-pick{display:flex;gap:8px}
 .class-status-pick button,.day-class-states button{flex:1;padding:8px 0;border-radius:8px;border:1.5px solid #dfe5ee;font-size:12px;font-weight:600;color:#7a8499;background:#fff}
-.class-status-pick button.on.status-done,.day-class-states button.on.status-done{background:#2a9d8f;border-color:#2a9d8f;color:#fff}
-.class-status-pick button.on.status-todo,.day-class-states button.on.status-todo{background:#7d879b;border-color:#7d879b;color:#fff}
-.class-status-pick button.on.status-review,.day-class-states button.on.status-review{background:#f2a93b;border-color:#f2a93b;color:#fff}
+.class-status-pick button.on.status-done,.day-class-states button.on.status-done{background:#6f7fa0;border-color:#6f7fa0;color:#fff}
+.class-status-pick button.on.status-todo,.day-class-states button.on.status-todo{background:#2a9d8f;border-color:#2a9d8f;color:#fff}
+.class-status-pick button.on.status-review,.day-class-states button.on.status-review{background:#e39a2d;border-color:#e39a2d;color:#fff}
 .class-editor textarea{width:100%;border:1px solid #e1e7f0;border-radius:8px;padding:9px 10px;font-size:13px;line-height:1.6;resize:none;outline:none;color:#4c5568}
 .class-editor textarea:focus{border-color:#9fd3cb}
 .class-editor footer{display:flex;align-items:center;gap:8px}
@@ -189,13 +183,13 @@
 .day-class-main small{font-size:9px;color:#2a9d8f;font-weight:600}
 .day-class-main span{font-size:11px;color:#5d6880}
 .day-class-main em{display:block;font-style:normal;font-size:10px;color:#a3abbb;margin-top:2px}
-.day-class.status-done .day-class-main span{color:#a3abbb}
-.day-class.status-todo .day-class-main span{text-decoration:line-through;color:#a3abbb}
+.day-class.status-done .day-class-main span{color:#6f7fa0}
 .day-class.status-review .day-class-main span{color:#c97f12;font-weight:600}
+.day-class.status-todo .day-class-main span{color:#2a9d8f}
 .day-class-states{display:flex;gap:5px}
 .day-class-states button{padding:3px 0;font-size:10px;border-radius:6px}
 .class-review-item{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid #f0f2f7}
-.class-review-main{flex:1;text-align:left;padding:0;border-left:3px solid #f2a93b;padding-left:10px}
+.class-review-main{flex:1;text-align:left;padding:0;border-left:3px solid #e39a2d;padding-left:10px}
 .class-review-main strong{font-size:13px;color:#3e465c}
 .class-review-main small{margin-left:8px;font-size:10px;color:#a3abbb}
 .class-review-main p{margin:5px 0 0;font-size:12px;line-height:1.6;color:#7c869c;white-space:pre-wrap}

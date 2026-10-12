@@ -15,7 +15,7 @@ import { Review } from './Review';
 import { WeeklyCard, WeeklySheet } from './Weekly';
 import type { WeeklyActions } from './Weekly';
 import { ClassSheet, ReviewClassCard } from './Classes';
-import { CLASS_STATUS_LABEL, classMarkFor, classState, setClassMark } from '@shared/classes';
+import { CLASS_STATE_COLOR, CLASS_STATUS_LABEL, classMarkFor, classState, setClassMark } from '@shared/classes';
 import type { ClassStatus } from '@shared/types';
 import { addMark, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, marksOn, mergeItems, removeMark, saveGoal as saveGoalItem, setMarkDone } from '@shared/weekly';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
@@ -328,17 +328,17 @@ export default function App() {
   // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
   const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'task'
     ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
-    : <span key={`class-${item.slot.id}`} className={`pill class status-${classState(classMarkFor(data.classMarks, item.slot.id, date), date, item.slot.end)}${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR, ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
+    : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_STATE_COLOR[classState(classMarkFor(data.classMarks, item.slot.id, date), date, item.slot.end)], ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
 
   // 课程和日程排在同一列表里，统一用课程色。
   const classRow = (slot: DayClass) => {
     const mark = classMarkFor(data.classMarks, slot.id, selected);
     const state = classState(mark, selected, slot.end);
     return (
-      <li key={`class-${slot.id}`} className={`class-row status-${state}${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties} onClick={() => setClassOpen({ slotId: slot.id, title: slot.title, time: `${slot.start}–${slot.end}`, end: slot.end, date: selected })}>
+      <li key={`class-${slot.id}`} className={`class-row status-${state}${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_STATE_COLOR[state] } as React.CSSProperties} onClick={() => setClassOpen({ slotId: slot.id, title: slot.title, time: `${slot.start}–${slot.end}`, end: slot.end, date: selected })}>
         <span className="class-time">{slot.start}<br />{slot.end}</span>
         <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{mark?.note && <small className="class-note">{mark.note}</small>}{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
-        {state !== 'upcoming' && <span className={`class-badge status-${state}`}>{CLASS_STATUS_LABEL[state]}</span>}
+        {(state === 'done' || state === 'review') && <span className={`class-badge status-${state}`}>{CLASS_STATUS_LABEL[state]}</span>}
       </li>
     );
   };
