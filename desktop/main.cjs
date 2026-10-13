@@ -73,7 +73,7 @@ let desktopHost = null;
 let calendarInteractive = false;
 let shortcutRegistered = false;
 let lastError = null;
-let settings = { opacity: 1, autostart: false, startupMode: 'desktop', widgetSpan: 'twoWeeks', widgetSide: 'right' };
+let settings = { opacity: 1, autostart: false, startupMode: 'desktop', widgetSpan: 'focus', widgetSide: 'right', layoutVersion: 2 };
 let settingsFile;
 let reminders;
 let reminderTimer;
@@ -719,7 +719,7 @@ function registerIpc() {
   handle('desktop:get-settings', () => snapshot());
   handle('desktop:set-mode', (value) => queueMode(value));
   handle('desktop:set-widget-span', (value) => {
-    if (!['week', 'twoWeeks', 'month'].includes(value)) throw new Error('未知的桌面日历范围。');
+    if (!['focus', 'week', 'twoWeeks', 'month'].includes(value)) throw new Error('未知的桌面日历范围。');
     return queueWidgetLayout({ widgetSpan: value });
   });
   handle('desktop:set-widget-side', (value) => {
@@ -998,7 +998,10 @@ if (hasLock) {
     settings.autostart = saved.autostart === true;
     settings.autostartDefaulted = saved.autostartDefaulted === true;
     settings.startupMode = resolveStartupMode(saved.startupMode);
-    settings.widgetSpan = ['week', 'twoWeeks', 'month'].includes(saved.widgetSpan) ? saved.widgetSpan : 'twoWeeks';
+    // 2026-10-13 起默认改成 7 天（左边今天大格，右边 6 天）；之前的“两周”默认值换成新样子，只在内存里换，下次保存时才写入。
+    settings.widgetSpan = ['focus', 'week', 'twoWeeks', 'month'].includes(saved.widgetSpan) ? saved.widgetSpan : 'focus';
+    if (saved.layoutVersion !== 2 && settings.widgetSpan === 'twoWeeks') settings.widgetSpan = 'focus';
+    settings.layoutVersion = 2;
     settings.widgetSide = ['left', 'right'].includes(saved.widgetSide) ? saved.widgetSide : 'right';
     reminders = new ReminderStore(path.join(app.getPath('userData'), 'scheduled-reminders.json'));
     registerIpc();

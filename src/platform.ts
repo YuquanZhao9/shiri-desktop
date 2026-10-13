@@ -9,7 +9,7 @@ import type { GoalMark, WeeklyGoal } from './types';
 import type { Reflection } from './types';
 import { addDays, dateKey, tasksForDate, isDone } from './core';
 
-export interface DesktopSettings { mode: 'window'|'desktop'|'fullscreen'; surface?: 'desktop'|'app'|'editor'; opacity: number; autostart: boolean; desktopAvailable: boolean; widgetSpan: 'week'|'twoWeeks'|'month'; widgetSide: 'left'|'right'; lastError?: string; }
+export interface DesktopSettings { mode: 'window'|'desktop'|'fullscreen'; surface?: 'desktop'|'app'|'editor'; opacity: number; autostart: boolean; desktopAvailable: boolean; widgetSpan: 'focus'|'week'|'twoWeeks'|'month'; widgetSide: 'left'|'right'; lastError?: string; }
 export interface CellEditorRequest { taskId:string; date:string; time:string; keepDraft:boolean; seq:number; }
 declare global { interface Window { desktop?: {
   getSettings(): Promise<DesktopSettings>;

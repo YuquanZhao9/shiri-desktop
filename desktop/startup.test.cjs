@@ -249,7 +249,7 @@ test('default startup shows only the transparent desktop widget; opening its man
   const before = await harness.ipc('desktop:get-settings', widget);
   assert.equal(before.mode, 'desktop');
   assert.equal(before.startupMode, 'desktop');
-  assert.equal(before.widgetSpan, 'twoWeeks');
+  assert.equal(before.widgetSpan, 'focus');
   assert.equal(before.widgetSide, 'right');
   assert.equal(before.lastError, null);
 
