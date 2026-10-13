@@ -236,3 +236,6 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .goal-chip .goal-cell.done { background:var(--goal); }
 .desktop-calendar .goal-chip.reached .goal-cell.done { background:#fff; color:#2f9e5f; border-color:#fff; }
 .desktop-calendar .goal-dots { margin-right:4px; }
+
+.desktop-calendar .calendar-event.goal-event.planned { background:color-mix(in srgb, var(--event-color) 22%, transparent); color:#fff; outline:1.5px dashed var(--event-color); outline-offset:-1.5px; }
+.desktop-calendar .calendar-event.goal-event.done { background:var(--event-color); color:#fff; }

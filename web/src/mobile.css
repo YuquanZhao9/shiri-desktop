@@ -395,3 +395,13 @@ svg { flex-shrink: 0; }
 .review-class-main small { margin-left: 8px; font-size: 12px; color: var(--muted); }
 .review-class-main span { display: block; margin-top: 3px; font-size: 13px; color: var(--muted); white-space: pre-wrap; }
 .review-class-done { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; color: #2a9d8f; background: color-mix(in srgb, #2a9d8f 12%, var(--card)); }
+
+/* 周次任务排在时间轴和当天列表里 */
+.pill.goal.planned { background: color-mix(in srgb, var(--c) 14%, var(--card)); color: var(--c); outline: 1px dashed var(--c); outline-offset: -1px; font-weight: 600; }
+.pill.goal.done-goal { background: var(--c); color: #fff; font-weight: 600; }
+.goal-row { border-left-style: dashed; background: color-mix(in srgb, var(--c) 6%, var(--card)); }
+.goal-row.done-goal { border-left-style: solid; }
+.wk-mark-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; font-size: 18px; color: var(--ink); }
+.wk-mark-title i { width: 10px; height: 10px; border-radius: 50%; background: var(--goal); }
+.wk-mark-title small { width: 100%; font-size: 13px; font-weight: 400; color: var(--muted); }
+.wk-mark-btns { margin-top: 14px; }

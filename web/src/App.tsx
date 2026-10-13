@@ -12,12 +12,12 @@ import type { GermanState } from '@shared/holidays';
 import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable, syncWeekly } from './sync';
 import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
 import { Review } from './Review';
-import { WeeklyCard, WeeklySheet } from './Weekly';
+import { GoalMarkSheet, WeeklyCard, WeeklySheet } from './Weekly';
 import type { WeeklyActions } from './Weekly';
 import { ClassSheet, ReviewClassCard } from './Classes';
 import { CLASS_STATE_COLOR, CLASS_STATUS_LABEL, classMarkFor, classState, setClassMark } from '@shared/classes';
 import type { ClassStatus } from '@shared/types';
-import { addMark, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, marksOn, mergeItems, removeMark, saveGoal as saveGoalItem, setMarkDone } from '@shared/weekly';
+import { activeGoals, addMark, autoPlanWeek, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, markDuration, marksOn, mergeItems, moveMark, removeMark, saveGoal as saveGoalItem, setMarkDone, timedMarksOn } from '@shared/weekly';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
@@ -78,6 +78,8 @@ export default function App() {
   const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
   const [goalReminder, setGoalReminder] = useState(() => pref('shiri-goal-reminder', '1') !== '0');
   const [weeklyOpen, setWeeklyOpen] = useState(false);
+  const [markOpen, setMarkOpen] = useState<string | null>(null);
+  const syncedOnce = useRef(false);
   const [classOpen, setClassOpen] = useState<{ slotId: string; title: string; time: string; end: string; date: string } | null>(null);
   const [notebook, setNotebook] = useState<'journal' | 'review'>(() => location.hash === '#review' ? 'review' : 'journal');
   const [reviewMode, setReviewMode] = useState<'day' | 'week' | 'month'>(() => location.hash === '#review' ? 'week' : 'day');
@@ -168,6 +170,7 @@ export default function App() {
       if (journal && keyRef.current === key) {
         setData(prev => { const merged = mergeJournal(prev.journal, journal); return JSON.stringify(merged) === JSON.stringify(prev.journal ?? []) ? prev : { ...prev, journal: merged }; });
       }
+      syncedOnce.current = true;
       setSyncState(`已同步 · ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`);
     } catch (error) {
       setSyncState(navigator.onLine ? '同步失败，已保存在本机' : '离线 · 已保存在本机');
@@ -202,6 +205,19 @@ export default function App() {
   const colorOf = (task: Task) => task.color || listOf(task.listId).color;
   const timetable = effectiveTimetable(data.timetable);
   // 与电脑版相同：学期内、非德国假日、当天有课的工作日才显示；空时段画成淡虚线框。
+  // 每周自动把周次任务排进空闲时间（等第一次同步完，免得和电脑上改过的打架）。
+  useEffect(() => {
+    if (!ready || (user && !syncedOnce.current) || !activeGoals(data.goals).length) return;
+    const live = data.tasks.filter(t => !t.deletedAt);
+    const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+    const busyOf = (date: string): [number, number][] => [
+      ...(classesForDate(timetable, date, !!germanHoliday(date, germanState)) ?? []).flatMap(row => row.slots).map(slot => [toMinutes(slot.start), toMinutes(slot.end)] as [number, number]),
+      ...tasksForDate(live, date).filter(t => t.time).map(t => [toMinutes(t.time), toMinutes(t.time) + t.duration] as [number, number]),
+    ];
+    const added = autoPlanWeek(data.goals, data.goalMarks, today, Date.now(), busyOf);
+    if (added.length) setData(prev => ({ ...prev, goalMarks: mergeItems(prev.goalMarks, added) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.goals, data.goalMarks, data.tasks, today, ready, user, syncState, data.timetable, germanState]);
   const classRows = (key: string): PeriodRow[] | null => showTimetable ? classesForDate(timetable, key, !!germanHoliday(key, germanState)) : null;
   function commit(task: Task) {
     if (!ready) return;
@@ -250,7 +266,8 @@ export default function App() {
   const weeklyActions: WeeklyActions = {
     saveGoal: goal => { if (!ready) return; const id = goal.id || uid(); setData(prev => { const goals = saveGoalItem(prev.goals, { ...goal, id }); return goals === prev.goals ? prev : { ...prev, goals }; }); },
     deleteGoal: id => { if (ready) setData(prev => ({ ...prev, goals: deleteGoalItem(prev.goals, id) })); },
-    addMark: (goalId, date, done) => { if (!ready) return; const id = uid(); setData(prev => ({ ...prev, goalMarks: addMark(prev.goalMarks, goalId, date, done, id) })); },
+    addMark: (goalId, date, done, time) => { if (!ready) return; const id = uid(); setData(prev => ({ ...prev, goalMarks: addMark(prev.goalMarks, goalId, date, done, id, Date.now(), time) })); },
+    moveMark: (id, date, time) => { if (ready) setData(prev => ({ ...prev, goalMarks: moveMark(prev.goalMarks, id, date, time) })); },
     setMarkDone: (id, done) => { if (ready) setData(prev => ({ ...prev, goalMarks: setMarkDone(prev.goalMarks, id, done) })); },
     removeMark: id => { if (ready) setData(prev => ({ ...prev, goalMarks: removeMark(prev.goalMarks, id) })); },
   };
@@ -326,7 +343,9 @@ export default function App() {
   };
 
   // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
-  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'task'
+  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'goal'
+    ? <span key={item.mark.id} className={`pill goal${item.mark.done ? ' done-goal' : ' planned'}`} style={{ '--c': item.goal.color, ...pos } as React.CSSProperties}>{item.goal.name}</span>
+    : item.kind === 'task'
     ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
     : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_STATE_COLOR[classState(classMarkFor(data.classMarks, item.slot.id, date), date, item.slot.end)], ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
 
@@ -342,7 +361,20 @@ export default function App() {
       </li>
     );
   };
-  const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
+  const goalRow = (goal: { id: string; name: string; color: string; duration?: number }, mark: { id: string; time?: string; done: boolean; duration?: number }) => {
+    const begin = Number(mark.time!.slice(0, 2)) * 60 + Number(mark.time!.slice(3));
+    const finish = begin + (mark.duration ?? goal.duration ?? 60);
+    return (
+      <li key={mark.id} className={`task-row goal-row${mark.done ? ' done-goal' : ''}`} style={{ '--c': goal.color } as React.CSSProperties}>
+        <button className="check" aria-label={mark.done ? '标为未完成' : '标为完成'} onClick={() => weeklyActions.setMarkDone(mark.id, !mark.done)}>{mark.done && <Check size={14} strokeWidth={3} />}</button>
+        <button className="task-main" onClick={() => setMarkOpen(mark.id)}>
+          <span className="task-title">{goal.name}</span>
+          <span className="task-meta"><span>{mark.time}–{String(Math.floor(finish / 60) % 24).padStart(2, '0')}:{String(finish % 60).padStart(2, '0')}</span><span className="dot" />周次任务{mark.done ? ' · 已完成' : ' · 安排'}</span>
+        </button>
+      </li>
+    );
+  };
+  const selectedAgenda = dayAgenda(dayTasks, classRows(selected), timedMarksOn(data.goals, data.goalMarks, selected));
 
   const calendar = (
     <section className="page calendar-page">
@@ -366,14 +398,14 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const layout = cellLayout(dayAgenda(tasks, classRows(key)));
+          const layout = cellLayout(dayAgenda(tasks, classRows(key), timedMarksOn(data.goals, data.goalMarks, key)));
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
                 <span className="num">{d.getDate()}</span>
                 {mark && <span className="badge">{mark.kind === 'rest' ? '休' : '班'}</span>}
                 {hasJournal(data.journal, key) && <span className="diary-badge" aria-label="日记已写">记✓</span>}
-                {marksOn(data.goals, data.goalMarks, key).length > 0 && <span className="wk-dots">{marksOn(data.goals, data.goalMarks, key).slice(0, 3).map(({ goal, mark }) => <i key={mark.id} className={mark.done ? 'done' : ''} style={{ '--goal': goal.color } as React.CSSProperties} />)}</span>}
+                {marksOn(data.goals, data.goalMarks, key).some(x => !x.mark.time) && <span className="wk-dots">{marksOn(data.goals, data.goalMarks, key).filter(x => !x.mark.time).slice(0, 3).map(({ goal, mark }) => <i key={mark.id} className={mark.done ? 'done' : ''} style={{ '--goal': goal.color } as React.CSSProperties} />)}</span>}
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
               <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
@@ -397,7 +429,7 @@ export default function App() {
           <input value={quick} onChange={e => setQuick(e.target.value)} placeholder="添加日程，如“15:00 开会”" enterKeyHint="done" maxLength={200} />
           {quick && <button type="submit" className="quick-save">添加</button>}
         </form>
-        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : classRow(item.slot))}</ul>
+        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : item.kind === 'goal' ? goalRow(item.goal, item.mark) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
         <WeeklyCard goals={data.goals} marks={data.goalMarks} date={selected} onManage={() => setWeeklyOpen(true)} actions={weeklyActions} />
         <button className={`diary-card${hasJournal(data.journal, selected) ? ' done' : ''}`} onClick={() => setJournalDate(selected)}>
@@ -522,6 +554,7 @@ export default function App() {
       </nav>
 
       {classOpen && <ClassSheet key={`${classOpen.slotId}:${classOpen.date}`} title={classOpen.title} time={classOpen.time} date={classOpen.date} mark={classMarkFor(data.classMarks, classOpen.slotId, classOpen.date)} state={classState(classMarkFor(data.classMarks, classOpen.slotId, classOpen.date), classOpen.date, classOpen.end)} onSave={(status, note) => setClassStatus({ id: classOpen.slotId, title: classOpen.title }, classOpen.date, status, note)} onClose={() => setClassOpen(null)} />}
+      {markOpen && (() => { const mark = (data.goalMarks ?? []).find(m => m.id === markOpen && !m.deletedAt); const goal = mark && activeGoals(data.goals).find(g => g.id === mark.goalId); return mark && goal ? <GoalMarkSheet key={mark.id} goal={goal} mark={mark} onClose={() => setMarkOpen(null)} actions={weeklyActions} /> : null; })()}
       {weeklyOpen && <WeeklySheet goals={data.goals} marks={data.goalMarks} today={today} onClose={() => setWeeklyOpen(false)} actions={weeklyActions} />}
       {journalDate && <JournalSheet key={journalDate} date={journalDate} text={journalText(data.journal, journalDate)} onSave={saveJournal} onClose={() => setJournalDate(null)} />}
       {editing && <Editor key={editing.task.id} task={editing.task} isNew={editing.isNew} lists={lists} onSave={save} onDelete={remove} onClose={() => setEditing(null)} />}

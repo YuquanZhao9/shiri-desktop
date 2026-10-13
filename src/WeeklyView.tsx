@@ -3,13 +3,14 @@ import { Check, ChevronLeft, ChevronRight, Pencil, Plus, Target, Trash2 } from '
 import type { GoalMark, WeeklyGoal } from './types';
 import { parseDate } from './core';
 import { weekRange } from './reflections';
-import { GOAL_COLORS, GOAL_REMINDER_TIME, goalHistory, goalWeeks } from './weekly';
+import { defaultTime, GOAL_COLORS, GOAL_REMINDER_TIME, goalHistory, goalWeeks } from './weekly';
 import type { GoalWeek } from './weekly';
 
 export interface WeeklyActions {
-  saveGoal: (goal: { id?: string; name: string; color: string; target: number; slots: number }) => void;
+  saveGoal: (goal: { id?: string; name: string; color: string; target: number; slots: number; duration?: number; time?: string }) => void;
   deleteGoal: (id: string) => void;
-  addMark: (goalId: string, date: string, done: boolean) => void;
+  addMark: (goalId: string, date: string, done: boolean, time?: string) => void;
+  moveMark: (id: string, date: string, time?: string) => void;
   setMarkDone: (id: string, done: boolean) => void;
   removeMark: (id: string) => void;
 }
@@ -50,9 +51,10 @@ export function GoalDay({ goals, marks, date, actions }: { goals?: WeeklyGoal[];
     const plannedHere = week.planned.find(mark => mark.date === date);
     return <div key={week.goal.id} className={`goal-day-row ${week.reached ? 'reached' : ''}`} style={{ '--goal': week.goal.color } as React.CSSProperties}>
       <i /><span>{week.goal.name}<small>本周 {week.done.length}/{week.goal.target}</small></span>
+      {(doneHere || plannedHere) && <input className="goal-day-time" type="time" title="时间（清空=不定时）" aria-label={`${week.goal.name} 的时间`} value={(doneHere ?? plannedHere)!.time ?? ''} onChange={e => actions.moveMark((doneHere ?? plannedHere)!.id, date, e.target.value || undefined)} />}
       {doneHere ? <button className="goal-day-btn on" onClick={() => actions.removeMark(doneHere.id)} title="撤销这天的完成"><Check size={12} />这天已完成</button>
         : plannedHere ? <><button className="goal-day-btn" onClick={() => actions.setMarkDone(plannedHere.id, true)}>完成</button><button className="goal-day-btn ghost" title="取消安排" onClick={() => actions.removeMark(plannedHere.id)}>取消安排</button></>
-          : <><button className="goal-day-btn" onClick={() => actions.addMark(week.goal.id, date, true)}>这天完成</button>{!week.reached && <button className="goal-day-btn ghost" onClick={() => actions.addMark(week.goal.id, date, false)}>安排到这天</button>}</>}
+          : <><button className="goal-day-btn" onClick={() => actions.addMark(week.goal.id, date, true)}>这天完成</button>{!week.reached && <button className="goal-day-btn ghost" onClick={() => actions.addMark(week.goal.id, date, false, week.goal.time ?? defaultTime(week.goal.name))}>安排到这天</button>}</>}
     </div>;
   })}</div>;
 }
@@ -61,7 +63,7 @@ export function GoalDay({ goals, marks, date, actions }: { goals?: WeeklyGoal[];
 export function WeeklyView({ goals, marks, today, remind, actions }: { goals?: WeeklyGoal[]; marks?: GoalMark[]; today: string; remind: boolean; actions: WeeklyActions }) {
   const [anchor, setAnchor] = useState(today);
   const [date, setDate] = useState(today);
-  const [editing, setEditing] = useState<{ id?: string; name: string; color: string; target: number; slots: number } | null>(null);
+  const [editing, setEditing] = useState<{ id?: string; name: string; color: string; target: number; slots: number; duration?: number; time?: string } | null>(null);
   const weeks = goalWeeks(goals, marks, anchor);
   const range = weekRange(anchor);
   const thisWeek = range.start === weekRange(today).start;
@@ -70,13 +72,13 @@ export function WeeklyView({ goals, marks, today, remind, actions }: { goals?: W
     <div className="weekly-top">
       <h2><Target size={17} />周次任务</h2>
       <div className="weekly-range"><button className="icon-button" aria-label="上一周" onClick={() => setAnchor(shiftWeek(anchor, -1))}><ChevronLeft size={16} /></button><strong>{short(range.start)} – {short(range.end)}{thisWeek && ' · 本周'}</strong><button className="icon-button" aria-label="下一周" onClick={() => setAnchor(shiftWeek(anchor, 1))}><ChevronRight size={16} /></button></div>
-      <button className="secondary" onClick={() => setEditing({ name: '', color: GOAL_COLORS[(goals?.length ?? 0) % GOAL_COLORS.length], target: 3, slots: 4 })}><Plus size={14} />添加</button>
+      <button className="secondary" onClick={() => setEditing({ name: '', color: GOAL_COLORS[(goals?.length ?? 0) % GOAL_COLORS.length], target: 3, slots: 4, duration: 60, time: '10:00' })}><Plus size={14} />添加</button>
     </div>
-    <p className="weekly-hint">不定具体时间、每周做几次的事。点空格子记一次完成（记在<input type="date" value={markDate} min={range.start} max={range.end} onChange={e => setDate(e.target.value || today)} />），点已完成的格子撤销。达标后变绿，多出来的格子变淡。每周一重新开始。{remind ? `周五 ${GOAL_REMINDER_TIME} 还差 2 次及以上会提醒你。` : ''}</p>
+    <p className="weekly-hint">不定具体时间、每周做几次的事。每周会自动在空闲时间（9–21 点，避开课程和日程）排好格子，日历上虚线的就是，拖到别的日子或在右栏改时间都行。点空格子记一次完成（记在<input type="date" value={markDate} min={range.start} max={range.end} onChange={e => setDate(e.target.value || today)} />），点已完成的格子撤销。达标后变绿，多出来的格子变淡。每周一重新开始。{remind ? `周五 ${GOAL_REMINDER_TIME} 还差 2 次及以上会提醒你。` : ''}</p>
     {editing && <GoalForm value={editing} onCancel={() => setEditing(null)} onSave={value => { actions.saveGoal(value); setEditing(null); }} />}
     {weeks.map(week => <section key={week.goal.id} className={`weekly-goal ${week.reached ? 'reached' : ''}`} style={{ '--goal': week.goal.color } as React.CSSProperties}>
       <header><i /><strong>{week.goal.name}</strong><span className="weekly-count">{week.done.length}<small> / {week.goal.target}</small></span>{week.reached ? <em className="weekly-state done">已达标</em> : <em className="weekly-state">还差 {week.remaining} 次</em>}
-        <span className="weekly-tools"><button className="icon-button" title="修改" aria-label={`修改 ${week.goal.name}`} onClick={() => setEditing({ id: week.goal.id, name: week.goal.name, color: week.goal.color, target: week.goal.target, slots: week.goal.slots })}><Pencil size={13} /></button><button className="icon-button" title="删除" aria-label={`删除 ${week.goal.name}`} onClick={() => { if (window.confirm(`删除周次任务“${week.goal.name}”？已记的完成也会一起隐藏。`)) actions.deleteGoal(week.goal.id); }}><Trash2 size={13} /></button></span></header>
+        <span className="weekly-tools"><button className="icon-button" title="修改" aria-label={`修改 ${week.goal.name}`} onClick={() => setEditing({ id: week.goal.id, name: week.goal.name, color: week.goal.color, target: week.goal.target, slots: week.goal.slots, duration: week.goal.duration ?? 60, time: week.goal.time ?? defaultTime(week.goal.name) })}><Pencil size={13} /></button><button className="icon-button" title="删除" aria-label={`删除 ${week.goal.name}`} onClick={() => { if (window.confirm(`删除周次任务“${week.goal.name}”？已记的完成也会一起隐藏。`)) actions.deleteGoal(week.goal.id); }}><Trash2 size={13} /></button></span></header>
       <GoalCells week={week} date={markDate} actions={actions} />
       {week.done.length + week.planned.length > 0 && <p className="weekly-days">{[...week.done.map(m => `周${weekday(m.date)}✓`), ...week.planned.map(m => `周${weekday(m.date)}（安排）`)].join('  ')}</p>}
       <History goal={week.goal} marks={marks} today={today} />
@@ -96,13 +98,15 @@ function History({ goal, marks, today }: { goal: WeeklyGoal; marks?: GoalMark[];
   </div>;
 }
 
-function GoalForm({ value, onSave, onCancel }: { value: { id?: string; name: string; color: string; target: number; slots: number }; onSave: (value: { id?: string; name: string; color: string; target: number; slots: number }) => void; onCancel: () => void }) {
+function GoalForm({ value, onSave, onCancel }: { value: { id?: string; name: string; color: string; target: number; slots: number; duration?: number; time?: string }; onSave: (value: { id?: string; name: string; color: string; target: number; slots: number; duration?: number; time?: string }) => void; onCancel: () => void }) {
   const [draft, setDraft] = useState(value);
   const set = (patch: Partial<typeof draft>) => setDraft(previous => { const next = { ...previous, ...patch }; if (patch.target !== undefined && next.slots < next.target) next.slots = next.target; if (patch.target !== undefined && previous.slots === previous.target + 1) next.slots = Math.min(14, next.target + 1); return next; });
   return <form className="goal-form" onSubmit={e => { e.preventDefault(); if (draft.name.trim()) onSave(draft); }}>
     <input autoFocus placeholder="名称，如 健身" maxLength={40} value={draft.name} onChange={e => set({ name: e.target.value })} />
     <label>每周<select value={draft.target} onChange={e => set({ target: Number(e.target.value) })}>{Array.from({ length: 14 }, (_, i) => <option key={i} value={i + 1}>{i + 1} 次</option>)}</select></label>
     <label>格子<select value={draft.slots} onChange={e => set({ slots: Number(e.target.value) })}>{Array.from({ length: 15 - draft.target }, (_, i) => <option key={i} value={draft.target + i}>{draft.target + i} 格</option>)}</select></label>
+    <label>每次<select value={draft.duration ?? 60} onChange={e => set({ duration: Number(e.target.value) })}>{[30, 45, 60, 90, 120, 150, 180].map(m => <option key={m} value={m}>{m < 60 ? `${m} 分钟` : `${m / 60} 小时`}</option>)}</select></label>
+    <label>习惯时间<input type="time" value={draft.time ?? '10:00'} onChange={e => set({ time: e.target.value || undefined })} /></label>
     <span className="goal-colors">{GOAL_COLORS.map(color => <button type="button" key={color} className={draft.color === color ? 'on' : ''} style={{ '--goal': color } as React.CSSProperties} aria-label={`颜色 ${color}`} onClick={() => set({ color })} />)}</span>
     <button type="submit" className="primary" disabled={!draft.name.trim()}>保存</button><button type="button" className="secondary" onClick={onCancel}>取消</button>
   </form>;

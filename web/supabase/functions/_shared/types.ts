@@ -103,6 +103,10 @@ export interface WeeklyGoal {
   color: string;
   target: number;
   slots: number;
+  /** Length of one session in minutes (default 60). */
+  duration?: number;
+  /** Preferred start time (HH:mm) when sessions are placed automatically. */
+  time?: string;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -114,6 +118,10 @@ export interface GoalMark {
   goalId: string;
   date: string;
   done: boolean;
+  /** Start time (HH:mm) when the session is scheduled; untimed otherwise. */
+  time?: string;
+  /** Minutes; defaults to the goal's duration. */
+  duration?: number;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;

@@ -149,3 +149,35 @@ test('课程状态：已下课默认已上、单击循环、备注、待复习�
   assert.deepEqual(validateBackup({ ...defaultData(), classMarks: later }).classMarks, later);
   assert.throws(() => c.validateClassMark({ ...later[0], status: 'skip' }));
 });
+
+test('周次任务自动排时间：从今天起、9–21 点、避开忙的时段、同一天不排两次、删掉的不再补', async () => {
+  const w = await import('../src/weekly');
+  const goals = [
+    { id: 'gym', name: '健身', color: '#3FA66B', target: 3, slots: 4, duration: 90, time: '17:30', createdAt: '2026-10-01T08:00:00.000Z', updatedAt: '2026-10-01T08:00:00.000Z' },
+    { id: 'de', name: '德语学习', color: '#3B7DDD', target: 2, slots: 4, duration: 60, time: '10:00', createdAt: '2026-10-01T09:00:00.000Z', updatedAt: '2026-10-01T09:00:00.000Z' },
+  ];
+  const now = new Date(2026, 9, 13, 15, 40).getTime();
+  const busy = (date: string): [number, number][] => date === '2026-10-14' ? [[600, 690], [1050, 1140]] : [];
+  const plan = w.autoPlanWeek(goals, [], '2026-10-13', now, busy);
+  const gym = plan.filter(m => m.goalId === 'gym'), de = plan.filter(m => m.goalId === 'de');
+  assert.equal(gym.length, 4);
+  assert.equal(de.length, 4);
+  for (const list of [gym, de]) assert.equal(new Set(list.map(m => m.date)).size, list.length, '同一天不排两次');
+  for (const m of plan) {
+    assert.ok(m.date >= '2026-10-13' && m.date <= '2026-10-18');
+    const start = Number(m.time!.slice(0, 2)) * 60 + Number(m.time!.slice(3));
+    assert.ok(start >= 540 && start + (m.goalId === 'gym' ? 90 : 60) <= 1260, m.time);
+    if (m.date === '2026-10-13') assert.ok(start >= 16 * 60 + 30, '今天只排现在之后');
+    if (m.date === '2026-10-14') for (const [a, b] of busy(m.date)) assert.ok(start + (m.goalId === 'gym' ? 90 : 60) + 15 <= a || start >= b + 15, `${m.goalId} ${m.time} 避开忙的时段`);
+  }
+  const sameDay = plan.filter(m => m.date === '2026-10-15');
+  if (sameDay.length === 2) { const [a, b] = sameDay.map(m => Number(m.time!.slice(0, 2)) * 60 + Number(m.time!.slice(3))); assert.ok(Math.abs(a - b) >= 75, '两个任务不重叠'); }
+  assert.deepEqual(w.autoPlanWeek(goals, plan, '2026-10-13', now, busy), [], '排过一次不重复');
+  const removed = w.removeMark(plan, gym[0].id, now);
+  assert.deepEqual(w.autoPlanWeek(goals, removed, '2026-10-13', now, busy), [], '删掉的不再补回');
+  const moved = w.moveMark(plan, gym[0].id, '2026-10-18', '09:00', now);
+  assert.equal(moved.find(m => m.id === gym[0].id)?.time, '09:00');
+  assert.ok(moved.find(m => m.id === gym[0].id)!.updatedAt > gym[0].updatedAt, '用户改过的比自动排的新');
+  assert.deepEqual(w.plannedAsTasks(goals, plan).length, 8);
+  assert.deepEqual(w.validateMarks(JSON.parse(JSON.stringify(plan))), plan);
+});

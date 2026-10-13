@@ -4,7 +4,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import type { JournalEntry, Task } from './types';
 import { journalReminders } from './journal';
 import { reviewReminders } from './reflections';
-import { goalReminders } from './weekly';
+import { goalReminders, plannedAsTasks } from './weekly';
 import type { GoalMark, WeeklyGoal } from './types';
 import type { Reflection } from './types';
 import { addDays, dateKey, tasksForDate, isDone } from './core';
@@ -90,7 +90,7 @@ export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes:number|n
   const next=pendingSchedule.catch(()=>{}).then(async()=>{
     if(revision!==scheduleRevision)return;
     const now=Date.now();
-    const queue=enabled?[...reminderQueue(tasks,30,now,leadMinutes),...(journal?journalReminders(journal,7,now):[]),...(reflections?reviewReminders(reflections,now):[]),...(weekly?goalReminders(weekly.goals,weekly.marks,now):[])].sort((a,b)=>a.at-b.at):[];
+    const queue=enabled?[...reminderQueue([...tasks,...plannedAsTasks(weekly?.goals,weekly?.marks)],30,now,leadMinutes),...(journal?journalReminders(journal,7,now):[]),...(reflections?reviewReminders(reflections,now):[]),...(weekly?goalReminders(weekly.goals,weekly.marks,now):[])].sort((a,b)=>a.at-b.at):[];
     if(window.desktop) { const result=await window.desktop.syncReminders(queue); if(!result.ok) throw new Error(result.error); return; }
     if(isNative) {
       const pending=await LocalNotifications.getPending();
