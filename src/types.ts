@@ -106,6 +106,11 @@ export interface WeeklyGoal {
   duration?: number;
   /** Preferred start time (HH:mm) when sessions are placed automatically. */
   time?: string;
+  /** Window for automatic placement (HH:mm); defaults 09:00–21:00. */
+  earliest?: string;
+  latest?: string;
+  /** Weekdays sessions may be placed on (1 = Monday … 7 = Sunday); all when absent. */
+  days?: number[];
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -121,6 +126,8 @@ export interface GoalMark {
   time?: string;
   /** Minutes; defaults to the goal's duration. */
   duration?: number;
+  /** Placed automatically and not touched since; re-planning may move it. */
+  auto?: boolean;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;

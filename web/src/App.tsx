@@ -17,7 +17,7 @@ import type { WeeklyActions } from './Weekly';
 import { ClassSheet, ReviewClassCard } from './Classes';
 import { CLASS_STATE_COLOR, CLASS_STATUS_LABEL, classMarkFor, classState, setClassMark } from '@shared/classes';
 import type { ClassStatus } from '@shared/types';
-import { activeGoals, addMark, autoPlanWeek, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, markDuration, marksOn, mergeItems, moveMark, removeMark, saveGoal as saveGoalItem, setMarkDone, timedMarksOn } from '@shared/weekly';
+import { activeGoals, addMark, autoPlanWeek, replanWeek, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, markDuration, marksOn, mergeItems, moveMark, removeMark, saveGoal as saveGoalItem, setMarkDone, timedMarksOn } from '@shared/weekly';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
@@ -205,16 +205,20 @@ export default function App() {
   const colorOf = (task: Task) => task.color || listOf(task.listId).color;
   const timetable = effectiveTimetable(data.timetable);
   // 与电脑版相同：学期内、非德国假日、当天有课的工作日才显示；空时段画成淡虚线框。
+  // 自动排周次任务时要避开的时间：课程和带时间的日程。
+  const busyOf = (snapshot: AppData) => {
+    const live = snapshot.tasks.filter(t => !t.deletedAt);
+    const table = effectiveTimetable(snapshot.timetable);
+    const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+    return (date: string): [number, number][] => [
+      ...(classesForDate(table, date, !!germanHoliday(date, germanState)) ?? []).flatMap(row => row.slots).map(slot => [toMinutes(slot.start), toMinutes(slot.end)] as [number, number]),
+      ...tasksForDate(live, date).filter(t => t.time).map(t => [toMinutes(t.time), toMinutes(t.time) + t.duration] as [number, number]),
+    ];
+  };
   // 每周自动把周次任务排进空闲时间（等第一次同步完，免得和电脑上改过的打架）。
   useEffect(() => {
     if (!ready || (user && !syncedOnce.current) || !activeGoals(data.goals).length) return;
-    const live = data.tasks.filter(t => !t.deletedAt);
-    const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
-    const busyOf = (date: string): [number, number][] => [
-      ...(classesForDate(timetable, date, !!germanHoliday(date, germanState)) ?? []).flatMap(row => row.slots).map(slot => [toMinutes(slot.start), toMinutes(slot.end)] as [number, number]),
-      ...tasksForDate(live, date).filter(t => t.time).map(t => [toMinutes(t.time), toMinutes(t.time) + t.duration] as [number, number]),
-    ];
-    const added = autoPlanWeek(data.goals, data.goalMarks, today, Date.now(), busyOf);
+    const added = autoPlanWeek(data.goals, data.goalMarks, today, Date.now(), busyOf(data));
     if (added.length) setData(prev => ({ ...prev, goalMarks: mergeItems(prev.goalMarks, added) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.goals, data.goalMarks, data.tasks, today, ready, user, syncState, data.timetable, germanState]);
@@ -264,7 +268,34 @@ export default function App() {
     setData(prev => { const classMarks = setClassMark(prev.classMarks, slot, date, status, note); return classMarks === prev.classMarks ? prev : { ...prev, classMarks }; });
   }
   const weeklyActions: WeeklyActions = {
-    saveGoal: goal => { if (!ready) return; const id = goal.id || uid(); setData(prev => { const goals = saveGoalItem(prev.goals, { ...goal, id }); return goals === prev.goals ? prev : { ...prev, goals }; }); },
+    // 改了时间设置就按新设置重排本周剩下的（做完的和挪过的不动）。
+    saveGoal: goal => {
+      if (!ready) return;
+      const id = goal.id || uid();
+      setData(prev => {
+        const goals = saveGoalItem(prev.goals, { ...goal, id });
+        if (goals === prev.goals) return prev;
+        if (!goal.id) return { ...prev, goals };
+        const { removed, added } = replanWeek(goals, prev.goalMarks, today, Date.now(), busyOf({ ...prev, goals }), uid, id);
+        let goalMarks = prev.goalMarks;
+        for (const markId of removed) goalMarks = removeMark(goalMarks, markId);
+        return { ...prev, goals, goalMarks: [...(goalMarks ?? []), ...added] };
+      });
+    },
+    replan: goalId => {
+      if (!ready) return;
+      let count = 0;
+      setData(prev => {
+        const { removed, added } = replanWeek(prev.goals, prev.goalMarks, today, Date.now(), busyOf(prev), uid, goalId);
+        count = added.length;
+        if (!removed.length && !added.length) return prev;
+        let goalMarks = prev.goalMarks;
+        for (const markId of removed) goalMarks = removeMark(goalMarks, markId);
+        return { ...prev, goalMarks: [...(goalMarks ?? []), ...added] };
+      });
+      setTimeout(() => say(count ? '已按现在的设置重新排好本周剩下的安排' : '本周没有可以重排的安排（做完的和挪过的不会动）'), 0);
+    },
+    openSettings: () => setWeeklyOpen(true),
     deleteGoal: id => { if (ready) setData(prev => ({ ...prev, goals: deleteGoalItem(prev.goals, id) })); },
     addMark: (goalId, date, done, time) => { if (!ready) return; const id = uid(); setData(prev => ({ ...prev, goalMarks: addMark(prev.goalMarks, goalId, date, done, id, Date.now(), time) })); },
     moveMark: (id, date, time) => { if (ready) setData(prev => ({ ...prev, goalMarks: moveMark(prev.goalMarks, id, date, time) })); },

@@ -49,7 +49,7 @@ function optionalDuration(value: unknown): number | undefined {
 
 export function validateGoal(value: unknown): WeeklyGoal {
   const item = record(value, '周次任务');
-  only(item, ['id', 'name', 'color', 'target', 'slots', 'duration', 'time', 'createdAt', 'updatedAt', 'deletedAt'], '周次任务');
+  only(item, ['id', 'name', 'color', 'target', 'slots', 'duration', 'time', 'earliest', 'latest', 'days', 'createdAt', 'updatedAt', 'deletedAt'], '周次任务');
   if (typeof item.id !== 'string' || !ID.test(item.id)) throw new Error('周次任务 ID 无效');
   if (typeof item.name !== 'string' || !item.name.trim() || item.name.length > 40 || /[\u0000-\u001F]/.test(item.name)) throw new Error('周次任务名称无效');
   if (typeof item.color !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(item.color)) throw new Error('周次任务颜色无效');
@@ -57,18 +57,26 @@ export function validateGoal(value: unknown): WeeklyGoal {
   if (!Number.isInteger(item.slots) || (item.slots as number) < (item.target as number) || (item.slots as number) > 14) throw new Error('格子数不能少于每周次数');
   const duration = optionalDuration(item.duration);
   const time = optionalTime(item.time);
-  return { id: item.id, name: item.name, color: item.color, target: item.target as number, slots: item.slots as number, ...(duration ? { duration } : {}), ...(time ? { time } : {}), ...stamps(item, '周次任务') };
+  const earliest = optionalTime(item.earliest), latest = optionalTime(item.latest);
+  if (earliest && latest && latest <= earliest) throw new Error('最晚时间须晚于最早时间');
+  let days: number[] | undefined;
+  if (item.days !== undefined) {
+    if (!Array.isArray(item.days) || item.days.length > 7 || item.days.some(d => !Number.isInteger(d) || d < 1 || d > 7)) throw new Error('可排的星期无效');
+    days = [...new Set(item.days as number[])].sort();
+  }
+  return { id: item.id, name: item.name, color: item.color, target: item.target as number, slots: item.slots as number, ...(duration ? { duration } : {}), ...(time ? { time } : {}), ...(earliest ? { earliest } : {}), ...(latest ? { latest } : {}), ...(days ? { days } : {}), ...stamps(item, '周次任务') };
 }
 
 export function validateMark(value: unknown): GoalMark {
   const item = record(value, '打卡');
-  only(item, ['id', 'goalId', 'date', 'done', 'time', 'duration', 'createdAt', 'updatedAt', 'deletedAt'], '打卡');
+  only(item, ['id', 'goalId', 'date', 'done', 'time', 'duration', 'auto', 'createdAt', 'updatedAt', 'deletedAt'], '打卡');
   if (typeof item.id !== 'string' || !ID.test(item.id) || typeof item.goalId !== 'string' || !ID.test(item.goalId)) throw new Error('打卡 ID 无效');
   if (!validDate(item.date)) throw new Error('打卡日期无效');
   if (typeof item.done !== 'boolean') throw new Error('打卡状态无效');
   const time = optionalTime(item.time);
   const duration = optionalDuration(item.duration);
-  return { id: item.id, goalId: item.goalId, date: item.date, done: item.done, ...(time ? { time } : {}), ...(duration ? { duration } : {}), ...stamps(item, '打卡') };
+  if (item.auto !== undefined && item.auto !== true) throw new Error('打卡标记无效');
+  return { id: item.id, goalId: item.goalId, date: item.date, done: item.done, ...(time ? { time } : {}), ...(duration ? { duration } : {}), ...(item.auto ? { auto: true as const } : {}), ...stamps(item, '打卡') };
 }
 
 function validateList<T extends { id: string }>(input: unknown, one: (value: unknown) => T, label: string): T[] {
@@ -102,16 +110,29 @@ export function activeGoals(goals: WeeklyGoal[] | undefined): WeeklyGoal[] {
   return (goals ?? []).filter(goal => !goal.deletedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
 
-export function saveGoal(goals: WeeklyGoal[] | undefined, goal: { id: string; name: string; color: string; target: number; slots: number; duration?: number; time?: string }, now = Date.now()): WeeklyGoal[] {
+export type GoalSettings = { id?: string; name: string; color: string; target: number; slots: number; duration?: number; time?: string; earliest?: string; latest?: string; days?: number[] };
+
+export function saveGoal(goals: WeeklyGoal[] | undefined, goal: GoalSettings & { id: string }, now = Date.now()): WeeklyGoal[] {
   const list = goals ?? [];
   const current = list.find(item => item.id === goal.id);
   const target = Math.min(14, Math.max(1, Math.round(goal.target)));
-  const next = { id: goal.id, name: goal.name.trim().slice(0, 40), color: goal.color, target, slots: Math.min(14, Math.max(target, Math.round(goal.slots))), duration: Math.min(600, Math.max(5, Math.round(goal.duration ?? current?.duration ?? 60))), time: goal.time && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(goal.time) ? goal.time : current?.time ?? defaultTime(goal.name) };
+  const next = { id: goal.id, name: goal.name.trim().slice(0, 40), color: goal.color, target, slots: Math.min(14, Math.max(target, Math.round(goal.slots))), duration: Math.min(600, Math.max(5, Math.round(goal.duration ?? current?.duration ?? 60))), time: goal.time && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(goal.time) ? goal.time : current?.time ?? defaultTime(goal.name) , ...windowOf(goal, current) };
   if (!next.name) return list;
-  if (current && !current.deletedAt && ['name', 'color', 'target', 'slots', 'duration', 'time'].every(key => current[key as keyof WeeklyGoal] === next[key as keyof typeof next])) return list;
+  if (current && !current.deletedAt && ['name', 'color', 'target', 'slots', 'duration', 'time', 'earliest', 'latest'].every(key => current[key as keyof WeeklyGoal] === next[key as keyof typeof next]) && JSON.stringify(current.days ?? null) === JSON.stringify(next.days ?? null)) return list;
   const stamp = at(now, current ? revision(current) : undefined);
   const saved: WeeklyGoal = { ...next, createdAt: current?.createdAt ?? stamp, updatedAt: stamp };
   return [...list.filter(item => item.id !== goal.id), saved];
+}
+
+const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+/** 时间范围和可排的星期：不填就是 09:00–21:00、每天。 */
+function windowOf(goal: GoalSettings, current?: WeeklyGoal): { earliest?: string; latest?: string; days?: number[] } {
+  const pick = (value: string | undefined, fallback: string | undefined) => value === undefined ? fallback : value && TIME_RE.test(value) ? value : undefined;
+  let earliest = pick(goal.earliest, current?.earliest), latest = pick(goal.latest, current?.latest);
+  if (earliest && latest && latest <= earliest) latest = undefined;
+  const raw = goal.days === undefined ? current?.days : goal.days;
+  const days = raw && raw.length && raw.length < 7 ? [...new Set(raw.filter(d => Number.isInteger(d) && d >= 1 && d <= 7))].sort() : undefined;
+  return { ...(earliest ? { earliest } : {}), ...(latest ? { latest } : {}), ...(days ? { days } : {}) };
 }
 
 export function deleteGoal(goals: WeeklyGoal[] | undefined, id: string, now = Date.now()): WeeklyGoal[] {
@@ -232,12 +253,42 @@ function addDaysKey(date: string, days: number): string {
  * 已有的（含删掉的）自动格不会再排，所以用户删掉或挪走的不会被改回来。返回新增的打卡。
  */
 export function autoPlanWeek(goals: WeeklyGoal[] | undefined, marks: GoalMark[] | undefined, today: string, now: number, busyOf: BusyOf): GoalMark[] {
-  const { start, end } = weekRange(today);
-  const all = marks ?? [];
-  const ids = new Set(all.map(mark => mark.id));
-  const week = activeMarks(all).filter(mark => mark.date >= start && mark.date <= end);
-  const added: GoalMark[] = [];
+  const { start } = weekRange(today);
+  const ids = new Set((marks ?? []).map(mark => mark.id));
   const stamp = `${start}T00:00:00.000Z`;
+  return placeSessions(goals, marks, today, now, busyOf, (goal, n) => {
+    const id = planMarkId(goal.id, start, n);
+    return ids.has(id) ? null : { id, stamp };
+  });
+}
+
+/**
+ * 按任务现在的设置，把本周还没做、也没被手动挪过的自动安排（今天及以后的）重新排一遍；
+ * 做完的和你挪过、改过的都不动。返回删掉的和新排的两组。
+ */
+export function replanWeek(goals: WeeklyGoal[] | undefined, marks: GoalMark[] | undefined, today: string, now: number, busyOf: BusyOf, newId: () => string, goalId?: string): { removed: string[]; added: GoalMark[] } {
+  const { start, end } = weekRange(today);
+  const nowDate = new Date(now);
+  const nowTime = `${String(nowDate.getHours()).padStart(2, '0')}:${String(nowDate.getMinutes()).padStart(2, '0')}`;
+  const movable = activeMarks(marks).filter(mark => (mark.auto || (mark.id.startsWith('plan_') && mark.createdAt === mark.updatedAt && mark.updatedAt.endsWith('T00:00:00.000Z'))) && !mark.done && mark.date >= today && mark.date <= end && mark.date >= start
+    && !(mark.date === today && (mark.time ?? '00:00') <= nowTime) && (!goalId || mark.goalId === goalId));
+  const removedIds = new Set(movable.map(mark => mark.id));
+  const kept = (marks ?? []).filter(mark => !removedIds.has(mark.id));
+  const counts = new Map<string, number>();
+  const stamp = new Date(now).toISOString();
+  const added = placeSessions(goals?.filter(goal => !goalId || goal.id === goalId), kept, today, now, busyOf, (goal) => {
+    const used = counts.get(goal.id) ?? 0;
+    counts.set(goal.id, used + 1);
+    return used < 14 ? { id: newId(), stamp } : null;
+  }, true);
+  return { removed: [...removedIds], added };
+}
+
+function placeSessions(goals: WeeklyGoal[] | undefined, marks: GoalMark[] | undefined, today: string, now: number, busyOf: BusyOf,
+  slotFor: (goal: WeeklyGoal, n: number) => { id: string; stamp: string } | null, ignoreIds = false): GoalMark[] {
+  const { start, end } = weekRange(today);
+  const week = activeMarks(marks).filter(mark => mark.date >= start && mark.date <= end);
+  const added: GoalMark[] = [];
   const goalById = new Map(activeGoals(goals).map(goal => [goal.id, goal]));
   const taken = (date: string): [number, number][] => [
     ...busyOf(date),
@@ -246,39 +297,36 @@ export function autoPlanWeek(goals: WeeklyGoal[] | undefined, marks: GoalMark[] 
   ];
   const nowDate = new Date(now);
   const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
-  const days = Array.from({ length: 7 }, (_, i) => addDaysKey(start, i)).filter(date => date >= today && date <= end);
+  const allDays = Array.from({ length: 7 }, (_, i) => addDaysKey(start, i)).filter(date => date >= today && date <= end);
   for (const goal of activeGoals(goals)) {
     const mine = () => [...week, ...added].filter(mark => mark.goalId === goal.id);
     const duration = goalDuration(goal);
-    const preferred = minutesOf(goal.time ?? defaultTime(goal.name));
+    const windowStart = minutesOf(goal.earliest ?? PLAN_DAY_START);
+    const windowEnd = minutesOf(goal.latest ?? PLAN_DAY_END);
+    const preferred = Math.min(Math.max(minutesOf(goal.time ?? defaultTime(goal.name)), windowStart), windowEnd - duration);
+    const days = allDays.filter(date => { const weekday = (new Date(`${date}T12:00:00`).getDay() + 6) % 7 + 1; return !goal.days || goal.days.includes(weekday); });
     for (let n = 1; n <= goal.slots; n++) {
-      const id = planMarkId(goal.id, start, n);
-      if (ids.has(id)) continue;
       if (mine().length >= goal.slots) break;
+      const slot = slotFor(goal, n);
+      if (!slot) { if (ignoreIds) break; continue; }
       const usedDays = new Set(mine().map(mark => mark.date));
-      // 离已排的日子越远越好，相同则越早越好。
-      const candidates = days.filter(date => !usedDays.has(date)).map(date => {
-        const index = days.indexOf(date);
-        const gaps = [...usedDays].map(day => Math.abs(Math.round((Date.parse(day) - Date.parse(date)) / 86_400_000)));
-        return { date, score: gaps.length ? Math.min(...gaps) : 7 - index * 0.01 };
-      }).sort((a, b) => b.score - a.score || a.date.localeCompare(b.date));
-      let placed: { date: string; time: string } | null = null;
-      for (const { date } of candidates) {
-        const earliest = Math.max(minutesOf(PLAN_DAY_START), date === today ? Math.ceil((nowMinutes + 30) / 30) * 30 : 0);
-        const latest = minutesOf(PLAN_DAY_END) - duration;
+      // 每个可选的日子先找离习惯时间最近的空档。
+      const options = days.filter(date => !usedDays.has(date)).flatMap(date => {
+        const earliest = Math.max(windowStart, date === today ? Math.ceil((nowMinutes + 30) / 30) * 30 : 0);
+        const latest = windowEnd - duration;
         const busy = taken(date);
         const free = (begin: number) => busy.every(([a, b]) => begin + duration + 15 <= a || begin >= b + 15);
-        // 先找习惯时间及以后，再往前找。
-        const order: number[] = [];
-        for (let t = Math.max(earliest, Math.round(preferred / 30) * 30); t <= latest; t += 30) order.push(t);
-        for (let t = Math.min(latest, Math.round(preferred / 30) * 30 - 30); t >= earliest; t -= 30) order.push(t);
-        const begin = order.find(free);
-        if (begin !== undefined) { placed = { date, time: timeOf(begin) }; break; }
-      }
-      if (!placed) break;
-      const mark: GoalMark = { id, goalId: goal.id, date: placed.date, done: false, time: placed.time, createdAt: stamp, updatedAt: stamp };
-      added.push(mark);
-      ids.add(id);
+        let best: number | undefined;
+        for (let t = Math.ceil(earliest / 30) * 30; t <= latest; t += 30) if (free(t) && (best === undefined || Math.abs(t - preferred) < Math.abs(best - preferred))) best = t;
+        if (best === undefined) return [];
+        const gaps = [...usedDays].map(day => Math.abs(Math.round((Date.parse(day) - Date.parse(date)) / 86_400_000)));
+        return [{ date, begin: best, spread: gaps.length ? Math.min(...gaps) : 7, off: Math.abs(best - preferred) }];
+      });
+      if (!options.length) break;
+      // 尽量和已排的日子隔开；隔开程度差不多（差 1 天以内）时，挑离习惯时间近的，再挑早的。
+      const widest = Math.max(...options.map(option => option.spread));
+      const choice = options.filter(option => option.spread >= widest - 1).sort((x, y) => x.off - y.off || y.spread - x.spread || x.date.localeCompare(y.date))[0];
+      added.push({ id: slot.id, goalId: goal.id, date: choice.date, done: false, time: timeOf(choice.begin), auto: true, createdAt: slot.stamp, updatedAt: slot.stamp });
     }
   }
   return added;
@@ -288,7 +336,7 @@ export function autoPlanWeek(goals: WeeklyGoal[] | undefined, marks: GoalMark[] 
 export function moveMark(marks: GoalMark[] | undefined, id: string, date: string, time: string | undefined, now = Date.now()): GoalMark[] {
   return (marks ?? []).map(mark => {
     if (mark.id !== id || mark.deletedAt || (mark.date === date && mark.time === time)) return mark;
-    const { time: _old, ...rest } = mark;
+    const { time: _old, auto: _auto, ...rest } = mark;
     return { ...rest, date, ...(time ? { time } : {}), updatedAt: at(now, revision(mark)) };
   });
 }

@@ -405,3 +405,10 @@ svg { flex-shrink: 0; }
 .wk-mark-title i { width: 10px; height: 10px; border-radius: 50%; background: var(--goal); }
 .wk-mark-title small { width: 100%; font-size: 13px; font-weight: 400; color: var(--muted); }
 .wk-mark-btns { margin-top: 14px; }
+
+.wk-settings { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.wk-replan { margin-bottom: 8px; }
+.wk-days-pick { display: flex; gap: 6px; }
+.wk-days-pick button { flex: 1; padding: 7px 0; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); background: var(--bg); border: 1px solid var(--line); }
+.wk-days-pick button.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.wk-form label input[type=time] { font-size: 15px; padding: 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); margin: 0 4px; }

@@ -181,3 +181,25 @@ test('周次任务自动排时间：从今天起、9–21 点、避开忙的时�
   assert.deepEqual(w.plannedAsTasks(goals, plan).length, 8);
   assert.deepEqual(w.validateMarks(JSON.parse(JSON.stringify(plan))), plan);
 });
+
+test('周次任务可调整：时间范围、可排的星期、重新排保留做完和挪过的', async () => {
+  const w = await import('../src/weekly');
+  let goals = w.saveGoal(undefined, { id: 'de', name: '德语学习', color: '#3B7DDD', target: 2, slots: 3, duration: 60, time: '10:00' }, Date.parse('2026-10-01T09:00:00.000Z'));
+  const now = new Date(2026, 9, 13, 8, 0).getTime();
+  const free = () => [] as [number, number][];
+  const plan = w.autoPlanWeek(goals, [], '2026-10-13', now, free);
+  assert.equal(plan.length, 3);
+  assert.ok(plan.every(m => m.auto && m.time === '10:00'));
+  // 只排周二、周四、周六，下午 14–18 点
+  goals = w.saveGoal(goals, { ...goals[0], earliest: '14:00', latest: '18:00', days: [2, 4, 6] }, now);
+  assert.deepEqual([goals[0].earliest, goals[0].latest, goals[0].days], ['14:00', '18:00', [2, 4, 6]]);
+  let marks = w.setMarkDone(plan, plan[0].id, true, now);
+  marks = w.moveMark(marks, plan[1].id, plan[1].date, '08:00', now);
+  const { removed, added } = w.replanWeek(goals, marks, '2026-10-13', now, free, () => `n${Math.random().toString(36).slice(2, 8)}`);
+  assert.deepEqual(removed, [plan[2].id], '只重排没做、没挪过的');
+  assert.equal(added.length, 1);
+  const weekday = (d: string) => (new Date(`${d}T12:00:00`).getDay() + 6) % 7 + 1;
+  assert.ok([2, 4, 6].includes(weekday(added[0].date)) && added[0].time! >= '14:00' && added[0].time! <= '17:00', `${added[0].date} ${added[0].time}`);
+  assert.throws(() => w.validateGoal({ ...goals[0], earliest: '18:00', latest: '09:00' }));
+  assert.deepEqual(w.validateGoal(JSON.parse(JSON.stringify(goals[0]))), goals[0]);
+});
