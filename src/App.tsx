@@ -195,7 +195,7 @@ function App() {
     if(!desktopSurface||!window.desktop||desktop?.mode!=='desktop')return;
     const bridge=window.desktop;
     let interactive=false, dragging=false, forwardingContext=false, lastSync=0;
-    const sync=(next:boolean)=>{interactive=next;lastSync=performance.now();void bridge.setCalendarInteractive(next);};
+    const sync=(next:boolean)=>{interactive=next;lastSync=performance.now();if(!next)window.dispatchEvent(new Event('shiri-hide-tip'));void bridge.setCalendarInteractive(next);};
     const reset=()=>{dragging=false;sync(false);};
     const move=(event:MouseEvent)=>{
       if(forwardingContext)return;
@@ -228,6 +228,36 @@ function App() {
     window.addEventListener('blur',reset);
     return()=>{document.removeEventListener('mousemove',move,true);document.removeEventListener('pointerdown',down,true);document.removeEventListener('pointerup',up,true);document.removeEventListener('contextmenu',context,true);window.removeEventListener('blur',reset);offPointerReset?.();reset();};
   },[desktopSurface,desktop?.mode,!!edit]);
+  // 桌面日历不用系统自带的悬停提示：鼠标穿到桌面上后窗口收不到“离开”，系统提示会一直挂着。
+  // 改成自己画的提示，离开日程、鼠标出日历、窗口失焦、几秒不动都会收起。
+  useEffect(()=>{
+    if(!desktopSurface)return;
+    const tip=document.createElement('div');tip.className='desktop-tip';tip.hidden=true;document.body.appendChild(tip);
+    let owner:HTMLElement|null=null,showTimer:ReturnType<typeof setTimeout>|undefined,hideTimer:ReturnType<typeof setTimeout>|undefined;
+    // 页面里一出现 title 就改成 data-tip，系统提示根本不会出现。
+    const strip=(element:Element)=>{const value=element.getAttribute('title');if(value!==null){(element as HTMLElement).dataset.tip=value;element.removeAttribute('title');if(element===owner&&!tip.hidden)tip.textContent=value;}};
+    document.querySelectorAll('[title]').forEach(strip);
+    const observer=new MutationObserver(records=>{for(const record of records){if(record.type==='attributes')strip(record.target as Element);else record.addedNodes.forEach(node=>{if(node instanceof Element){strip(node);node.querySelectorAll('[title]').forEach(strip);}});}});
+    observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title']});
+    const hide=()=>{clearTimeout(showTimer);clearTimeout(hideTimer);owner=null;tip.hidden=true;};
+    const over=(event:MouseEvent)=>{
+      const element=(event.target as Element|null)?.closest<HTMLElement>('[title],[data-tip]');
+      if(element?.hasAttribute('title'))strip(element);
+      if(!element||!element.dataset.tip){hide();return;}
+      if(element===owner)return;
+      hide();owner=element;
+      showTimer=setTimeout(()=>{if(owner!==element||!element.isConnected)return;tip.textContent=element.dataset.tip||'';tip.hidden=false;const r=element.getBoundingClientRect();const w=tip.offsetWidth,h=tip.offsetHeight;tip.style.left=`${Math.max(4,Math.min(window.innerWidth-w-4,r.left))}px`;tip.style.top=`${r.bottom+6+h>window.innerHeight?r.top-h-6:r.bottom+6}px`;},450);
+    };
+    const move=()=>{clearTimeout(hideTimer);hideTimer=setTimeout(hide,5000);};
+    const leave=(event:MouseEvent)=>{if(!event.relatedTarget)hide();};
+    document.addEventListener('mouseover',over,true);
+    document.addEventListener('mousemove',move,true);
+    document.addEventListener('mouseout',leave,true);
+    document.addEventListener('pointerdown',hide,true);
+    window.addEventListener('blur',hide);
+    window.addEventListener('shiri-hide-tip',hide);
+    return()=>{observer.disconnect();hide();tip.remove();document.removeEventListener('mouseover',over,true);document.removeEventListener('mousemove',move,true);document.removeEventListener('mouseout',leave,true);document.removeEventListener('pointerdown',hide,true);window.removeEventListener('blur',hide);window.removeEventListener('shiri-hide-tip',hide);};
+  },[desktopSurface]);
   useEffect(()=>()=>{if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);if(eventClickTimer.current)clearTimeout(eventClickTimer.current);},[]);
   useEffect(()=>{
     if(!ready||loadedKey!==storageKey)return; const timer=setTimeout(()=>scheduleNative(data.tasks,reminders,reminderLeads(reminderLead),journalReminder?data.journal??[]:null,reviewReminder?data.reflections??[]:null,goalReminder?{goals:data.goals,marks:data.goalMarks}:null).catch(()=>toast('提醒计划未能更新，请检查通知权限')),800);

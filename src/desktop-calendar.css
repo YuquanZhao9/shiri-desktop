@@ -239,3 +239,7 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 
 .desktop-calendar .calendar-event.goal-event.planned { background:color-mix(in srgb, var(--event-color) 22%, transparent); color:#fff; outline:1.5px dashed var(--event-color); outline-offset:-1.5px; }
 .desktop-calendar .calendar-event.goal-event.done { background:var(--event-color); color:#fff; }
+
+/* 桌面日历自己的悬停提示（代替系统提示，离开就收起） */
+.desktop-tip { position:fixed; z-index:1000; max-width:340px; padding:5px 9px; border-radius:6px; background:#1d2633ee; color:#f2f6fb; font-size:12px; line-height:1.5; pointer-events:none; box-shadow:0 4px 14px #0006; white-space:pre-wrap; }
+.desktop-tip[hidden] { display:none; }

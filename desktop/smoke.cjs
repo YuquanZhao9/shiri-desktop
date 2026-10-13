@@ -200,6 +200,14 @@ let application;
   await journalPage.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
   await journalPage.close();
+  // Hover hints on the desktop calendar are drawn by the page and go away when the pointer leaves.
+  await page.locator('[data-date="2026-10-12"] .class-event').first().hover();
+  await page.waitForSelector('.desktop-tip:not([hidden])', { timeout: 5000 });
+  assert.match(await page.locator('.desktop-tip').textContent(), /课|讲课|练习|录像/);
+  assert.equal(await page.locator('[data-date="2026-10-12"] .class-event[title]').count(), 0, 'no native tooltip left on hovered items');
+  await page.mouse.move(2, 2);
+  await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: null })));
+  await page.waitForSelector('.desktop-tip[hidden]', { state: 'attached', timeout: 3000 });
   // Clicking a class cycles its status (已上 → 待复习 …); double-clicking opens the class window.
   const amClass = page.locator('[data-date="2026-10-12"] .class-event', { hasText: 'AR 讲课' }).first();
   const before = await amClass.getAttribute('class');
