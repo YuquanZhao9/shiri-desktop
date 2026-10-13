@@ -257,7 +257,7 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .focus-weekday { font-size:11px; color:#dbe6f5; white-space:nowrap; }
 .desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child .focus-weekday { font-size:13px; font-weight:600; }
 
-/* 7 天视图的时间刻度和“现在”线 */
+/* 7 天视图的时间刻度 */
 .desktop-calendar .cell-hours-row { flex:1 1 auto; min-height:0; display:flex; gap:3px; }
 .desktop-calendar .cell-hours-row > .cell-hours { flex:1 1 auto; }
 .desktop-calendar .cell-axis { position:relative; flex:none; width:16px; }
@@ -266,6 +266,3 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .cell-hours-row.big .cell-axis > span { font-size:10px; color:#d8e2f0c8; }
 .desktop-calendar .cell-axis > span:first-child { transform:none; }
 .desktop-calendar .cell-axis > span:last-child { transform:translateY(-100%); }
-.desktop-calendar .now-marker { position:absolute; left:0; right:0; height:0; border-top:1.5px solid #ff8a7a; z-index:3; pointer-events:none; }
-.desktop-calendar .now-marker::before { content:""; position:absolute; left:-4px; top:-4.5px; width:7px; height:7px; border-radius:50%; background:#ff8a7a; }
-.desktop-calendar .now-marker span { position:absolute; right:2px; top:-15px; font-size:10px; font-weight:600; color:#ffb3a8; font-variant-numeric:tabular-nums; }

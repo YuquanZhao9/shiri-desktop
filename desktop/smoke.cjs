@@ -200,6 +200,14 @@ let application;
   await journalPage.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
   await journalPage.close();
+  // 7-day view: hour labels on the time axis, no "now" line (the user asked for it to go).
+  await page.getByRole('button', { name: '7 天' }).click();
+  await page.getByRole('button', { name: '今天' }).click();
+  await page.waitForSelector('.day-cell.today .cell-axis', { state: 'attached' });
+  assert.equal(await page.locator('.now-marker').count(), 0);
+  // Back to the fortnight that the checks below expect.
+  await page.getByRole('button', { name: '两周' }).click();
+  for (let step = 0; step < 30 && !(await page.locator('[data-date="2026-10-12"]').count()); step++) await page.getByRole('button', { name: (await page.locator('[data-date]').first().getAttribute('data-date')) < '2026-10-12' ? '下一段' : '上一段' }).click();
   // Hover hints on the desktop calendar are drawn by the page and go away when the pointer leaves.
   await page.locator('[data-date="2026-10-12"] .class-event').first().hover();
   await page.waitForSelector('.desktop-tip:not([hidden])', { timeout: 5000 });
