@@ -247,15 +247,14 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .goal-adjust { color:#eef4ff; background:#ffffff26; border-radius:12px; padding:3px 10px; font-size:12px; white-space:nowrap; }
 .desktop-calendar .goal-adjust:hover { background:#ffffff40; }
 
-/* 7 天：左边今天一个大格（占两行），右边接下来 6 天，3 列 × 2 行 */
-.desktop-calendar[data-span='focus'] .month-grid { grid-template-columns:minmax(0,1.7fr) repeat(3,minmax(0,1fr)); grid-template-rows:repeat(2,minmax(0,1fr)); }
-.desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child { grid-row:1 / span 2; }
-.desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child .day-number { font-size:20px; width:34px; height:34px; }
-.desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child .calendar-event { font-size:12px; }
-.desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child .calendar-event small { font-size:11px; }
-.desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child .event-notes { display:block; }
+/* 7 天：周一到周日一行排开，今天那一列加宽（列宽在 App.tsx 里按今天是哪天设置） */
+.desktop-calendar[data-span='focus'] .month-grid { grid-template-columns:repeat(7,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
+.desktop-calendar[data-span='focus'] .month-grid > .day-cell.today .day-number { font-size:20px; width:34px; height:34px; }
+.desktop-calendar[data-span='focus'] .month-grid > .day-cell.today .calendar-event { font-size:12px; }
+.desktop-calendar[data-span='focus'] .month-grid > .day-cell.today .calendar-event small { font-size:11px; }
+.desktop-calendar[data-span='focus'] .month-grid > .day-cell.today .event-notes { display:block; }
 .desktop-calendar .focus-weekday { font-size:11px; color:#dbe6f5; white-space:nowrap; }
-.desktop-calendar[data-span='focus'] .month-grid > .day-cell:first-child .focus-weekday { font-size:13px; font-weight:600; }
+.desktop-calendar[data-span='focus'] .month-grid > .day-cell.today .focus-weekday { font-size:13px; font-weight:600; }
 
 /* 7 天视图的时间刻度 */
 .desktop-calendar .cell-hours-row { flex:1 1 auto; min-height:0; display:flex; gap:3px; }
