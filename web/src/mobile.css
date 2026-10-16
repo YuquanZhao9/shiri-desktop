@@ -412,3 +412,6 @@ svg { flex-shrink: 0; }
 .wk-days-pick button { flex: 1; padding: 7px 0; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); background: var(--bg); border: 1px solid var(--line); }
 .wk-days-pick button.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 .wk-form label input[type=time] { font-size: 15px; padding: 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); margin: 0 4px; }
+
+/* 完成了的事情统一一种颜色（和“已上”的课同色），取消完成恢复原色 */
+.pill.done, .task-row.done { --c: #6F7FA0 !important; }

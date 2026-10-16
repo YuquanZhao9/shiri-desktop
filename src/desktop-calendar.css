@@ -265,3 +265,5 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .cell-hours-row.big .cell-axis > span { font-size:10px; color:#d8e2f0c8; }
 .desktop-calendar .cell-axis > span:first-child { transform:none; }
 .desktop-calendar .cell-axis > span:last-child { transform:translateY(-100%); }
+/* 完成了的事情统一一种颜色 */
+.desktop-calendar .calendar-event.done { --event-color:#6F7FA0 !important; }

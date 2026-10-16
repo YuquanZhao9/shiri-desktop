@@ -206,3 +206,6 @@
 .goal-days button{padding:3px 6px;border-radius:5px;font-size:10px;color:#9aa3b6;background:#f1f3f7}
 .goal-days button.on{color:#fff;background:#6f7fd4}
 .goal-adjust{font-size:11px;padding:3px 9px;border-radius:12px;color:#5b6b8c;background:#eef1f8}
+/* 完成了的事情统一一种颜色（和“已上”的课同色，见 src/classes.ts CLASS_STATE_COLOR.done），取消完成恢复原色 */
+.calendar-event.done,.timeline-event.done,.task-row.done{--event-color:#6F7FA0 !important}
+.task-row.done .priority{background:#6F7FA0 !important}
