@@ -38,16 +38,6 @@ Deno.serve(async request => {
       .eq('user_id', userId).eq('deleted', false).neq('payload->>time', '');
     if (taskError) return new Response(taskError.message, { status: 500 });
     const tasks = (data || []).map((row: { payload: ReminderTask }) => row.payload);
-    // 周次任务里排了时间、还没完成的格子，和日程一样提醒。
-    const since = new Date(now - 2 * 86_400_000).toISOString().slice(0, 10);
-    const { data: goalRows } = await admin.from('shiri_weekly').select('payload').eq('user_id', userId).eq('kind', 'goal').eq('deleted', false);
-    const { data: markRows } = await admin.from('shiri_weekly').select('payload').eq('user_id', userId).eq('kind', 'mark').eq('deleted', false).gte('day', since);
-    const names = new Map((goalRows || []).map((row: { payload: { id: string; name: string } }) => [row.payload.id, row.payload.name]));
-    for (const row of (markRows || []) as { payload: { id: string; goalId: string; date: string; time?: string; done: boolean } }[]) {
-      const mark = row.payload;
-      if (!mark.time || mark.done || !names.has(mark.goalId)) continue;
-      tasks.push({ id: mark.id, title: names.get(mark.goalId)!, date: mark.date, time: mark.time, repeat: 'none', completed: false, doneDates: [] });
-    }
     tasksByUser.set(userId, tasks);
   }
 

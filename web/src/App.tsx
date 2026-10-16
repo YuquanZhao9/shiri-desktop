@@ -405,7 +405,7 @@ export default function App() {
       </li>
     );
   };
-  const selectedAgenda = dayAgenda(dayTasks, classRows(selected), timedMarksOn(data.goals, data.goalMarks, selected));
+  const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
 
   const calendar = (
     <section className="page calendar-page">
@@ -429,14 +429,13 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const layout = cellLayout(dayAgenda(tasks, classRows(key), timedMarksOn(data.goals, data.goalMarks, key)));
+          const layout = cellLayout(dayAgenda(tasks, classRows(key)));
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
                 <span className="num">{d.getDate()}</span>
                 {mark && <span className="badge">{mark.kind === 'rest' ? '休' : '班'}</span>}
                 {hasJournal(data.journal, key) && <span className="diary-badge" aria-label="日记已写">记✓</span>}
-                {marksOn(data.goals, data.goalMarks, key).some(x => !x.mark.time) && <span className="wk-dots">{marksOn(data.goals, data.goalMarks, key).filter(x => !x.mark.time).slice(0, 3).map(({ goal, mark }) => <i key={mark.id} className={mark.done ? 'done' : ''} style={{ '--goal': goal.color } as React.CSSProperties} />)}</span>}
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
               <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
