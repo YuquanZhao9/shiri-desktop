@@ -47,6 +47,7 @@ const editorWindows = new Set();
 let journalWindow = null;
 let reviewQuickWindow = null;
 let classEditorWindow = null;
+let weightWindow = null;
 // One focusable cell editor is created in advance and reused, so a double-click
 // only moves and reveals it instead of starting a new renderer each time.
 let cellEditorWindow = null;
@@ -599,6 +600,42 @@ async function openClassEditor(request) {
   }
 }
 
+// 填体重的小窗口：桌面日历上点 08:00 的“测体重”打开（只开一个）。
+async function openWeightEditor(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期无效。');
+  const hash = `weight?date=${date}`;
+  if (weightWindow && !weightWindow.isDestroyed()) {
+    await loadSurface(weightWindow, hash);
+    if (!smokeTest) { setCalendarInteractive(false); weightWindow.show(); weightWindow.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  }
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 380, height = 290;
+  const editor = new BrowserWindow({
+    title: '昱时 · 测体重',
+    width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + work.height * 0.22),
+    minWidth: 320, minHeight: 250, backgroundColor: '#f7f8fb', alwaysOnTop: true,
+    show: false, autoHideMenuBar: true, minimizable: false, maximizable: false, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  weightWindow = editor;
+  editorWindows.add(editor);
+  editor.on('closed', () => { editorWindows.delete(editor); if (weightWindow === editor) weightWindow = null; });
+  secureContents(editor);
+  try {
+    await loadSurface(editor, hash);
+    if (!smokeTest) { setCalendarInteractive(false); editor.show(); editor.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    editor.destroy();
+    throw error;
+  }
+}
+
 function showNotification(value) {
   const options = validateNotification(value);
   if (smokeTest) return { ok: false, error: '隐藏测试环境禁止显示系统通知。' };
@@ -747,6 +784,7 @@ function registerIpc() {
   handle('desktop:open-journal', (date) => openJournalWindow(date));
   handle('desktop:open-review-quick', () => openReviewQuick());
   handle('desktop:open-class-editor', (request) => openClassEditor(request));
+  handle('desktop:open-weight', (date) => openWeightEditor(date));
   ipcMain.handle('desktop:open-inline-editor', async (event, request) => {
     const testSurface = smokeTest && event.sender === mainWindow?.webContents && event.sender.getURL().endsWith('#desktop');
     if (!isTrustedFrame(event) || (event.sender !== desktopWindow?.webContents && !testSurface))

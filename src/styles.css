@@ -209,3 +209,34 @@
 /* 完成了的事情统一一种颜色（和“已上”的课同色，见 src/classes.ts CLASS_STATE_COLOR.done），取消完成恢复原色 */
 .calendar-event.done,.timeline-event.done,.task-row.done{--event-color:#6F7FA0 !important}
 .task-row.done .priority{background:#6F7FA0 !important}
+
+/* 测体重 */
+.calendar-event.weight-event{cursor:pointer}
+.weight-editor{display:flex;flex-direction:column;gap:12px;padding:18px}
+.weight-editor header{display:flex;align-items:center;gap:10px;color:#c9822b}
+.weight-editor header strong{display:block;font-size:15px;color:#33415a}
+.weight-editor header small{display:block;margin-top:3px;font-size:11px;color:#8e98ad}
+.weight-input{display:flex;align-items:baseline;gap:8px}
+.weight-input input{flex:1;min-width:0;font-size:30px;font-weight:600;letter-spacing:.5px;padding:6px 10px;border:1px solid #e1e7f0;border-radius:10px;color:#33415a;outline:none;font-variant-numeric:tabular-nums}
+.weight-input input:focus{border-color:#e3b47a;box-shadow:0 0 0 3px #f7e4cc66}
+.weight-input span{font-size:16px;color:#8e98ad}
+.weight-hint{margin:0;font-size:11px;color:#9aa3b6}
+.weight-editor footer{display:flex;align-items:center;gap:8px}
+.weight-editor footer>span{flex:1}
+.weight-modal{width:380px}
+.weight-window{background:linear-gradient(180deg,#fbf8f3,#f3eee6)}
+.weight-view{display:flex;flex-direction:column;gap:12px}
+.weight-view .list-view-title h2{display:flex;align-items:center;gap:7px}
+.weight-today{margin-left:auto;padding:6px 12px}
+.weight-chart{width:100%;max-width:640px;height:auto}
+.weight-chart polyline{fill:none;stroke:#c9822b;stroke-width:2}
+.weight-chart circle{fill:#fff;stroke:#c9822b;stroke-width:2}
+.weight-chart line{stroke:#e6e9f0}
+.weight-chart text{font-size:11px;fill:#9aa3b6}
+.weight-list{list-style:none;margin:0;padding:0}
+.weight-list button{display:flex;align-items:baseline;gap:14px;width:100%;text-align:left;padding:10px 4px;border-bottom:1px solid #f0f2f7;border-radius:0}
+.weight-list span{flex:1;font-size:12px;color:#65708a}
+.weight-list b{font-size:14px;color:#3e465c;font-variant-numeric:tabular-nums}
+.weight-list small{width:44px;text-align:right;font-size:11px;color:#9aa3b6;font-variant-numeric:tabular-nums}
+.weight-list small.up{color:#d0674f}
+.weight-list small.down{color:#3fa66b}

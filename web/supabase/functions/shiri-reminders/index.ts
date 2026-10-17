@@ -4,7 +4,7 @@
 // SUPABASE_SERVICE_ROLE_KEY 由 Supabase 自动提供）。
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import webpush from 'npm:web-push@3.6.7';
-import { dueReminders, goalDue, goalWindow, journalDue, MULTI_LEADS, reviewDue, zonedDateKey, type GoalRow, type MarkRow, type ReminderTask } from './schedule.ts';
+import { dueReminders, goalDue, goalWindow, journalDue, MULTI_LEADS, reviewDue, weightDue, zonedDateKey, type GoalRow, type MarkRow, type ReminderTask } from './schedule.ts';
 
 const env = (name: string) => {
   const value = Deno.env.get(name);
@@ -16,7 +16,7 @@ const env = (name: string) => {
 webpush.setVapidDetails('https://yuquanzhao9.github.io/yushi-app/', env('VAPID_PUBLIC_KEY'), env('VAPID_PRIVATE_KEY'));
 const admin = createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
 
-interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean; review_reminder: boolean; goal_reminder: boolean }
+interface Subscription { endpoint: string; user_id: string; p256dh: string; auth: string; time_zone: string; lead_minutes: number; journal_reminder: boolean; review_reminder: boolean; goal_reminder: boolean; weight_reminder: boolean }
 
 function sameSecret(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -28,7 +28,7 @@ function sameSecret(a: string, b: string): boolean {
 Deno.serve(async request => {
   if (!sameSecret(request.headers.get('x-cron-secret') ?? '', env('CRON_SECRET'))) return new Response('forbidden', { status: 403 });
 
-  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder,review_reminder,goal_reminder');
+  const { data: subscriptions, error } = await admin.from('shiri_push_subscriptions').select('endpoint,user_id,p256dh,auth,time_zone,lead_minutes,journal_reminder,review_reminder,goal_reminder,weight_reminder');
   if (error) return new Response(error.message, { status: 500 });
 
   const now = Date.now();
@@ -89,6 +89,13 @@ Deno.serve(async request => {
       // 先看是否到点，到点了才查当天日记。
       const diary = journalDue(sub.time_zone, now, () => false);
       if (diary && !(await written(sub.user_id, zonedDateKey(now, sub.time_zone)))) due.push(diary);
+    }
+    if (sub.weight_reminder !== false) {
+      const weight = weightDue(sub.time_zone, now);
+      if (weight) {
+        const { data: row } = await admin.from('shiri_weekly').select('deleted').eq('user_id', sub.user_id).eq('id', `weight_${weight.day.replace(/-/g, '')}`).maybeSingle();
+        if (!row || (row as { deleted: boolean }).deleted) due.push(weight.due);
+      }
     }
     if (sub.goal_reminder !== false) {
       const window = goalWindow(sub.time_zone, now);

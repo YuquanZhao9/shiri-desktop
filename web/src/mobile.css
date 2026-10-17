@@ -415,3 +415,29 @@ svg { flex-shrink: 0; }
 
 /* 完成了的事情统一一种颜色（和“已上”的课同色），取消完成恢复原色 */
 .pill.done, .task-row.done { --c: #6F7FA0 !important; }
+
+/* 测体重 */
+.pill.weight { background: color-mix(in srgb, var(--c) 18%, var(--card)); color: var(--c); font-weight: 600; }
+.weight-row { align-items: center; }
+.weight-icon { width: 44px; display: grid; place-items: center; color: var(--c); flex-shrink: 0; }
+.weight-main { flex: 1; }
+.weight-row.done-weight .task-title { color: var(--muted); }
+.weight-history-btn { padding: 0; font-size: 12px; }
+.weight-field { display: flex; align-items: baseline; gap: 4px; margin-right: 14px; }
+.weight-field input { width: 76px; font-size: 20px; font-weight: 700; text-align: right; padding: 4px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); font-variant-numeric: tabular-nums; outline: none; }
+.weight-field input:focus { border-color: var(--c); }
+.weight-field span { font-size: 13px; color: var(--muted); }
+.weight-sheet { padding-bottom: calc(var(--safe-bottom) + 24px); }
+.weight-sheet-title { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; font-size: 18px; color: var(--ink); }
+.weight-sheet-title svg { color: #C9822B; }
+.weight-chart { width: 100%; height: auto; }
+.weight-chart polyline { fill: none; stroke: #C9822B; stroke-width: 2; }
+.weight-chart circle { fill: var(--card); stroke: #C9822B; stroke-width: 2; }
+.weight-chart text { font-size: 10px; fill: var(--muted); }
+.weight-days { list-style: none; margin: 8px 0 0; padding: 0; }
+.weight-days li { display: flex; align-items: baseline; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.weight-days span { flex: 1; font-size: 14px; color: var(--ink); }
+.weight-days b { font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.weight-days small { width: 44px; text-align: right; font-size: 12px; color: var(--muted); }
+.weight-days small.up { color: #d0674f; }
+.weight-days small.down { color: #3fa66b; }

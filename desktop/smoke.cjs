@@ -56,7 +56,7 @@ let application;
   assert.equal(renderer.invalidQueue.ok, false);
   assert.equal(renderer.require, 'undefined');
   assert.equal(renderer.nodeProcess, 'undefined');
-  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onJournalOpen', 'onModeChanged', 'onPointerReset', 'onReviewQuickOpen', 'openClassEditor', 'openEditor', 'openInlineEditor', 'openJournalWindow', 'openReviewQuick', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
+  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onJournalOpen', 'onModeChanged', 'onPointerReset', 'onReviewQuickOpen', 'openClassEditor', 'openEditor', 'openInlineEditor', 'openJournalWindow', 'openReviewQuick', 'openWeightEditor', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
   await page.getByRole('button', { name: '时间表', exact: true }).click();
   await page.waitForSelector('.timeline', { state: 'attached' });
   await page.getByRole('button', { name: '月历', exact: true }).click();
@@ -205,6 +205,15 @@ let application;
   await page.getByRole('button', { name: '今天' }).click();
   await page.waitForSelector('.day-cell.today .cell-axis', { state: 'attached' });
   assert.equal(await page.locator('.now-marker').count(), 0);
+  // 08:00 测体重 in today's cell opens the small weight window; Enter saves the number.
+  const weightPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#weight?'), timeout: 15000 });
+  await page.locator('.day-cell.today .weight-event').click();
+  const weightPage = await weightPagePromise;
+  await weightPage.waitForSelector('.weight-input input');
+  await weightPage.locator('.weight-input input').fill('72.5');
+  await weightPage.locator('.weight-input input').press('Enter').catch(() => {});
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).weights || []).some(item => item.kg === 72.5), null, { timeout: 5000 });
+  await page.waitForSelector('.day-cell.today .weight-event.done', { state: 'attached' });
   // Back to the fortnight that the checks below expect.
   await page.getByRole('button', { name: '两周' }).click();
   for (let step = 0; step < 30 && !(await page.locator('[data-date="2026-10-12"]').count()); step++) await page.getByRole('button', { name: (await page.locator('[data-date]').first().getAttribute('data-date')) < '2026-10-12' ? '下一段' : '上一段' }).click();

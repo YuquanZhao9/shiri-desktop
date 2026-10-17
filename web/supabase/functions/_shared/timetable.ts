@@ -164,11 +164,12 @@ export function effectiveTimetable(saved: Timetable | undefined): Timetable {
 /** All classes share one color so they read as one kind of entry among the day's events. */
 export const CLASS_COLOR = '#2A9D8F';
 
-export type AgendaItem = { kind: 'task'; time: string; task: Task } | { kind: 'class'; time: string; slot: DayClass } | { kind: 'goal'; time: string; goal: WeeklyGoal; mark: GoalMark };
+export type AgendaItem = { kind: 'task'; time: string; task: Task } | { kind: 'class'; time: string; slot: DayClass } | { kind: 'goal'; time: string; goal: WeeklyGoal; mark: GoalMark } | { kind: 'weight'; time: string; date: string; kg?: number };
 
 /** A day's events and classes in one list by start time; untimed events go last. */
-export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null, goals: { goal: WeeklyGoal; mark: GoalMark }[] = []): AgendaItem[] {
+export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null, goals: { goal: WeeklyGoal; mark: GoalMark }[] = [], weight?: { time: string; date: string; kg?: number }): AgendaItem[] {
   const items: AgendaItem[] = [
+    ...(weight ? [{ kind: 'weight' as const, ...weight }] : []),
     ...goals.filter(item => item.mark.time).map(item => ({ kind: 'goal' as const, time: item.mark.time!, goal: item.goal, mark: item.mark })),
     ...(classes ?? []).flatMap(row => row.slots.map(slot => ({ kind: 'class' as const, time: slot.start, slot }))),
     ...tasks.map(task => ({ kind: 'task' as const, time: task.time, task })),
@@ -200,7 +201,7 @@ export function cellLayout(items: AgendaItem[], minHeight = 0.06): { timed: Plac
   const untimed = items.filter(item => !item.time);
   const spans = items.filter(item => item.time).map(item => {
     const start = clock(item.time);
-    let end = item.kind === 'task' ? start + item.task.duration : item.kind === 'goal' ? start + (item.mark.duration ?? item.goal.duration ?? 60) : clock(item.slot.end);
+    let end = item.kind === 'task' ? start + item.task.duration : item.kind === 'goal' ? start + (item.mark.duration ?? item.goal.duration ?? 60) : item.kind === 'weight' ? start + 30 : clock(item.slot.end);
     if (end <= start) end = start + 60;
     const top = dayFraction(start);
     const height = Math.max(dayFraction(end) - top, minHeight);

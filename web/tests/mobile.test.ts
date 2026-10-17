@@ -115,3 +115,11 @@ test('云端周五 19:00 周次任务提醒：只提醒还差 2 次及以上的'
   assert.equal(goalDue(goals, marks, window!)?.body, '健身还差 3 次，周末安排一下吧');
   assert.equal(goalDue(goals.slice(1), marks, window!), null);
 });
+
+test('云端 08:00 测体重推送：按用户时区到点', async () => {
+  const { weightDue, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const eight = zt('2026-10-17', '08:00', 'Europe/Berlin');
+  assert.equal(weightDue('Europe/Berlin', eight)?.day, '2026-10-17');
+  assert.equal(weightDue('Europe/Berlin', eight)?.due.occurrence, 'weight:2026-10-17:08:00');
+  assert.equal(weightDue('Europe/Berlin', eight + 30 * 60_000), null);
+});

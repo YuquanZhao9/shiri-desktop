@@ -12,6 +12,8 @@ import type { GermanState } from '@shared/holidays';
 import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable, syncWeekly } from './sync';
 import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
 import { Review } from './Review';
+import { WeightHistorySheet, WeightRow } from './Weight';
+import { setWeight, WEIGHT_TIME, weightOn } from '@shared/weight';
 import { GoalMarkSheet, WeeklyCard, WeeklySheet } from './Weekly';
 import type { WeeklyActions } from './Weekly';
 import { ClassSheet, ReviewClassCard } from './Classes';
@@ -77,6 +79,8 @@ export default function App() {
   const [journalReminder, setJournalReminder] = useState(() => pref('shiri-journal-reminder', '1') !== '0');
   const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
   const [goalReminder, setGoalReminder] = useState(() => pref('shiri-goal-reminder', '1') !== '0');
+  const [weightReminder, setWeightReminder] = useState(() => pref('shiri-weight-reminder', '1') !== '0');
+  const [weightOpen, setWeightOpen] = useState(false);
   const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [markOpen, setMarkOpen] = useState<string | null>(null);
   const syncedOnce = useRef(false);
@@ -158,9 +162,9 @@ export default function App() {
       if (timetable && keyRef.current === key) {
         setData(prev => prev.timetable && prev.timetable.updatedAt > timetable.updatedAt || JSON.stringify(prev.timetable) === JSON.stringify(timetable) ? prev : { ...prev, timetable });
       }
-      const weekly = await syncWeekly(client, owner.id, dataRef.current.goals, dataRef.current.goalMarks, dataRef.current.classMarks);
+      const weekly = await syncWeekly(client, owner.id, dataRef.current.goals, dataRef.current.goalMarks, dataRef.current.classMarks, dataRef.current.weights);
       if (weekly && keyRef.current === key) {
-        setData(prev => { const goals = mergeItems(prev.goals, weekly.goals), goalMarks = mergeItems(prev.goalMarks, weekly.marks), classMarks = mergeItems(prev.classMarks, weekly.classMarks); return JSON.stringify(goals) === JSON.stringify(mergeItems(prev.goals)) && JSON.stringify(goalMarks) === JSON.stringify(mergeItems(prev.goalMarks)) && JSON.stringify(classMarks) === JSON.stringify(mergeItems(prev.classMarks)) ? prev : { ...prev, goals, goalMarks, classMarks }; });
+        setData(prev => { const goals = mergeItems(prev.goals, weekly.goals), goalMarks = mergeItems(prev.goalMarks, weekly.marks), classMarks = mergeItems(prev.classMarks, weekly.classMarks), weights = mergeItems(prev.weights, weekly.weights); return JSON.stringify(goals) === JSON.stringify(mergeItems(prev.goals)) && JSON.stringify(goalMarks) === JSON.stringify(mergeItems(prev.goalMarks)) && JSON.stringify(classMarks) === JSON.stringify(mergeItems(prev.classMarks)) && JSON.stringify(weights) === JSON.stringify(mergeItems(prev.weights)) ? prev : { ...prev, goals, goalMarks, classMarks, weights }; });
       }
       const reflections = await syncReflections(client, owner.id, dataRef.current.reflections);
       if (reflections && keyRef.current === key) {
@@ -262,6 +266,10 @@ export default function App() {
   function saveJournal(date: string, text: string) {
     if (!ready) return;
     setData(prev => { const journal = writeJournal(prev.journal, date, text); return journal === prev.journal || (!prev.journal && !journal.length) ? prev : { ...prev, journal }; });
+  }
+  function saveWeight(date: string, kg: number | null) {
+    if (!ready) return;
+    setData(prev => { const weights = setWeight(prev.weights, date, kg); return weights === prev.weights ? prev : { ...prev, weights }; });
   }
   function setClassStatus(slot: { id: string; title: string }, date: string, status: ClassStatus, note?: string) {
     if (!ready) return;
@@ -374,7 +382,9 @@ export default function App() {
   };
 
   // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
-  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'goal'
+  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'weight'
+    ? <span key="weight" className={`pill weight${item.kg !== undefined ? ' done' : ''}`} style={{ '--c': '#C9822B', ...pos } as React.CSSProperties}>体重{item.kg !== undefined ? ` ${item.kg.toFixed(1)}` : ''}</span>
+    : item.kind === 'goal'
     ? <span key={item.mark.id} className={`pill goal${item.mark.done ? ' done-goal' : ' planned'}`} style={{ '--c': item.goal.color, ...pos } as React.CSSProperties}>{item.goal.name}</span>
     : item.kind === 'task'
     ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
@@ -405,7 +415,8 @@ export default function App() {
       </li>
     );
   };
-  const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
+  // 测体重：今天和以前的日子可以填（补记），以后的日子不显示。
+  const selectedAgenda = dayAgenda(dayTasks, classRows(selected), [], selected <= today ? { time: WEIGHT_TIME, date: selected, kg: weightOn(data.weights, selected)?.kg } : undefined);
 
   const calendar = (
     <section className="page calendar-page">
@@ -429,7 +440,7 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const layout = cellLayout(dayAgenda(tasks, classRows(key)));
+          const layout = cellLayout(dayAgenda(tasks, classRows(key), [], key === today || weightOn(data.weights, key) ? { time: WEIGHT_TIME, date: key, kg: weightOn(data.weights, key)?.kg } : undefined));
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
@@ -459,7 +470,7 @@ export default function App() {
           <input value={quick} onChange={e => setQuick(e.target.value)} placeholder="添加日程，如“15:00 开会”" enterKeyHint="done" maxLength={200} />
           {quick && <button type="submit" className="quick-save">添加</button>}
         </form>
-        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : item.kind === 'goal' ? goalRow(item.goal, item.mark) : classRow(item.slot))}</ul>
+        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : item.kind === 'weight' ? <WeightRow key="weight" date={selected} weights={data.weights} onSave={kg => saveWeight(selected, kg)} onHistory={() => setWeightOpen(true)} /> : item.kind === 'goal' ? goalRow(item.goal, item.mark) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
         <WeeklyCard goals={data.goals} marks={data.goalMarks} date={selected} onManage={() => setWeeklyOpen(true)} actions={weeklyActions} />
         <button className={`diary-card${hasJournal(data.journal, selected) ? ' done' : ''}`} onClick={() => setJournalDate(selected)}>
@@ -529,20 +540,26 @@ export default function App() {
             journalReminder={journalReminder}
             reviewReminder={reviewReminder}
             goalReminder={goalReminder}
+            weightReminder={weightReminder}
+            onWeightReminder={async value => {
+              setWeightReminder(value); setPref('shiri-weight-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, reviewReminder, goalReminder, value).catch(e => say((e as Error).message));
+            }}
             onGoalReminder={async value => {
               setGoalReminder(value); setPref('shiri-goal-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, reviewReminder, value).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, reviewReminder, value, weightReminder).catch(e => say((e as Error).message));
             }}
             onReviewReminder={async value => {
               setReviewReminder(value); setPref('shiri-review-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, value, goalReminder).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, value, goalReminder, weightReminder).catch(e => say((e as Error).message));
             }}
             onJournalReminder={async value => {
               setJournalReminder(value); setPref('shiri-journal-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value, reviewReminder, goalReminder).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value, reviewReminder, goalReminder, weightReminder).catch(e => say((e as Error).message));
             }}
             onGermanState={value => { setGermanState(value); setPref('shiri-de-state', value); }} say={say} sync={() => void runSync()}
             onConfig={(url, key) => { const next = saveCloudConfig(url, key); setClient(next); setConfig(cloudConfig()); }}
@@ -556,14 +573,14 @@ export default function App() {
             onLead={async value => {
               setLead(value); setPref('shiri-reminder-lead', String(value));
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder, reviewReminder, goalReminder).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder, reviewReminder, goalReminder, weightReminder).catch(e => say((e as Error).message));
             }}
             onMergeLocal={() => {
               try {
                 const raw = localStorage.getItem(LOCAL_KEY);
                 if (!raw) { say('这台手机上没有未登录时记下的日程'); return; }
                 const local = validateBackup(JSON.parse(raw));
-                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}), ...(local.reflections ? { reflections: mergeReflections(prev.reflections, local.reflections) } : {}), ...(local.goals ? { goals: mergeItems(prev.goals, local.goals) } : {}), ...(local.goalMarks ? { goalMarks: mergeItems(prev.goalMarks, local.goalMarks) } : {}) }));
+                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}), ...(local.reflections ? { reflections: mergeReflections(prev.reflections, local.reflections) } : {}), ...(local.goals ? { goals: mergeItems(prev.goals, local.goals) } : {}), ...(local.goalMarks ? { goalMarks: mergeItems(prev.goalMarks, local.goalMarks) } : {}), ...(local.weights ? { weights: mergeItems(prev.weights, local.weights) } : {}) }));
                 say('已并入当前账号，正在同步');
               } catch { say('本机数据未能读取'); }
             }}
@@ -585,6 +602,7 @@ export default function App() {
 
       {classOpen && <ClassSheet key={`${classOpen.slotId}:${classOpen.date}`} title={classOpen.title} time={classOpen.time} date={classOpen.date} mark={classMarkFor(data.classMarks, classOpen.slotId, classOpen.date)} state={classState(classMarkFor(data.classMarks, classOpen.slotId, classOpen.date), classOpen.date, classOpen.end)} onSave={(status, note) => setClassStatus({ id: classOpen.slotId, title: classOpen.title }, classOpen.date, status, note)} onClose={() => setClassOpen(null)} />}
       {markOpen && (() => { const mark = (data.goalMarks ?? []).find(m => m.id === markOpen && !m.deletedAt); const goal = mark && activeGoals(data.goals).find(g => g.id === mark.goalId); return mark && goal ? <GoalMarkSheet key={mark.id} goal={goal} mark={mark} onClose={() => setMarkOpen(null)} actions={weeklyActions} /> : null; })()}
+      {weightOpen && <WeightHistorySheet weights={data.weights} today={today} onClose={() => setWeightOpen(false)} />}
       {weeklyOpen && <WeeklySheet goals={data.goals} marks={data.goalMarks} today={today} onClose={() => setWeeklyOpen(false)} actions={weeklyActions} />}
       {journalDate && <JournalSheet key={journalDate} date={journalDate} text={journalText(data.journal, journalDate)} onSave={saveJournal} onClose={() => setJournalDate(null)} />}
       {editing && <Editor key={editing.task.id} task={editing.task} isNew={editing.isNew} lists={lists} onSave={save} onDelete={remove} onClose={() => setEditing(null)} />}
@@ -714,12 +732,13 @@ interface MeProps {
   journalReminder: boolean; onJournalReminder: (value: boolean) => void;
   reviewReminder: boolean; onReviewReminder: (value: boolean) => void;
   goalReminder: boolean; onGoalReminder: (value: boolean) => void;
+  weightReminder: boolean; onWeightReminder: (value: boolean) => void;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
   passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, weightReminder, onWeightReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetOffer, setResetOffer] = useState('');
@@ -781,7 +800,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
     setBusy(true);
     try {
       if (pushOn) { await disablePush(client); onPush(false); say('已关闭这台手机的提醒'); }
-      else { await enablePush(client, user.id, lead, journalReminder, reviewReminder, goalReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
+      else { await enablePush(client, user.id, lead, journalReminder, reviewReminder, goalReminder, weightReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
     } catch (error) { say((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -861,6 +880,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
               <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
               <label className="kv"><span>{JOURNAL_REMINDER_TIME} 还没写日记时提醒</span><input type="checkbox" className="switch" checked={journalReminder} disabled={busy} onChange={e => onJournalReminder(e.target.checked)} /></label>
               <label className="kv"><span>每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总</span><input type="checkbox" className="switch" checked={reviewReminder} disabled={busy} onChange={e => onReviewReminder(e.target.checked)} /></label>
+              <label className="kv"><span>每天 {WEIGHT_TIME} 还没记体重时提醒</span><input type="checkbox" className="switch" checked={weightReminder} disabled={busy} onChange={e => onWeightReminder(e.target.checked)} /></label>
               <label className="kv"><span>周五 {GOAL_REMINDER_TIME} 周次任务还差 2 次及以上时提醒</span><input type="checkbox" className="switch" checked={goalReminder} disabled={busy} onChange={e => onGoalReminder(e.target.checked)} /></label>
             </div>
           )}

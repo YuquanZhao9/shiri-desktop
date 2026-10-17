@@ -24,5 +24,6 @@ export function mergeWindowData(current: AppData, incoming: AppData): AppData {
   if (current.goals || incoming.goals) next.goals = mergeItems(current.goals, incoming.goals);
   if (current.goalMarks || incoming.goalMarks) next.goalMarks = mergeItems(current.goalMarks, incoming.goalMarks);
   if (current.classMarks || incoming.classMarks) next.classMarks = mergeItems(current.classMarks, incoming.classMarks);
+  if (current.weights || incoming.weights) next.weights = mergeItems(current.weights, incoming.weights);
   return JSON.stringify(next) === JSON.stringify(current) ? current : next;
 }

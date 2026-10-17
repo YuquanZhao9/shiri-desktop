@@ -150,6 +150,16 @@ export interface ClassMark {
   deletedAt?: string;
 }
 
+/** Morning weight for one date (测体重); a deletion keeps a tombstone so it syncs. */
+export interface WeightEntry {
+  id: string;
+  date: string;
+  kg: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
 export interface AppData {
   version: 1;
   tasks: Task[];
@@ -165,4 +175,6 @@ export interface AppData {
   goalMarks?: GoalMark[];
   /** Per-date class status (已上 / 未上 / 待复习) and notes. */
   classMarks?: ClassMark[];
+  /** Daily 08:00 weight (测体重). */
+  weights?: WeightEntry[];
 }

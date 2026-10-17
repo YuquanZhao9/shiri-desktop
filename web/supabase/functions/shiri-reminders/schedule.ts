@@ -154,3 +154,14 @@ export function goalDue(goals: GoalRow[], marks: MarkRow[], window: { start: str
   if (!behind.length) return null;
   return { occurrence: `goals:${window.start}:${GOAL_TIME}`, title: '这周的周次任务还差几次', body: `${behind.map(item => `${item.name}还差 ${item.remaining} 次`).join('，')}，周末安排一下吧`, at: window.at };
 }
+
+/** 每天这个时间还没记体重就推送（与桌面版 src/weight.ts 的 WEIGHT_TIME 相同）。 */
+export const WEIGHT_TIME = '08:00';
+
+/** 用户所在时区今天 08:00 到点时返回一条推送（是否已记由调用方再查）；不是这个时刻返回 null。 */
+export function weightDue(timeZone: string, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): { day: string; due: Due } | null {
+  const today = zonedDateKey(now, timeZone);
+  const at = zonedTime(today, WEIGHT_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs) return null;
+  return { day: today, due: { occurrence: `weight:${today}:${WEIGHT_TIME}`, title: '测体重', body: '早上测一下体重，在昱时里填上数字', at } };
+}

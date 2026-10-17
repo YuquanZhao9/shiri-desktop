@@ -203,3 +203,30 @@ test('周次任务可调整：时间范围、可排的星期、重新排保留�
   assert.throws(() => w.validateGoal({ ...goals[0], earliest: '18:00', latest: '09:00' }));
   assert.deepEqual(w.validateGoal(JSON.parse(JSON.stringify(goals[0]))), goals[0]);
 });
+
+test('测体重：读数字、记下改掉删掉、合并、08:00 没记才提醒', async () => {
+  const w = await import('../src/weight');
+  const m = await import('../src/weekly');
+  assert.equal(w.parseKg('72.5'), 72.5);
+  assert.equal(w.parseKg(' 72,46 kg '), 72.5);
+  assert.equal(w.parseKg('abc'), null);
+  assert.equal(w.parseKg('5'), null);
+  const t = Date.parse('2026-10-17T06:10:00.000Z');
+  let list = w.setWeight(undefined, '2026-10-17', 72.5, t);
+  assert.equal(w.weightOn(list, '2026-10-17')?.kg, 72.5);
+  assert.equal(w.setWeight(list, '2026-10-17', 72.5, t + 1), list);
+  const changed = w.setWeight(list, '2026-10-17', 72.1, t - 1000);
+  assert.ok(changed[0].updatedAt > list[0].updatedAt);
+  list = w.setWeight(changed, '2026-10-16', 73, t);
+  assert.deepEqual(w.weightHistory(list).map(e => e.kg), [72.1, 73]);
+  const removed = w.setWeight(list, '2026-10-16', null, t + 5000);
+  assert.equal(w.weightOn(removed, '2026-10-16'), undefined);
+  assert.deepEqual(m.mergeItems(list, removed), m.mergeItems(removed, list));
+  assert.deepEqual(w.validateWeights(JSON.parse(JSON.stringify(removed))), removed);
+  assert.throws(() => w.validateWeight({ ...list[0], kg: 5 }));
+  const now = new Date(2026, 9, 17, 7, 0).getTime();
+  assert.deepEqual(w.weightReminders([], 2, now).map(r => r.id), ['weight:2026-10-17', 'weight:2026-10-18']);
+  assert.deepEqual(w.weightReminders(w.setWeight(undefined, '2026-10-17', 70, now), 2, now).map(r => r.id), ['weight:2026-10-18']);
+  assert.deepEqual(w.weightReminders([], 1, new Date(2026, 9, 17, 9, 0).getTime()), []);
+  assert.equal(validateBackup({ ...defaultData(), weights: list }).weights?.length, 2);
+});

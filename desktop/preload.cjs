@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   openJournalWindow: (date) => ipcRenderer.invoke('desktop:open-journal', date),
   openReviewQuick: () => ipcRenderer.invoke('desktop:open-review-quick'),
   openClassEditor: (request) => ipcRenderer.invoke('desktop:open-class-editor', request),
+  openWeightEditor: (date) => ipcRenderer.invoke('desktop:open-weight', date),
   openInlineEditor: (request) => ipcRenderer.invoke('desktop:open-inline-editor', request),
   closeEditor: (seq) => ipcRenderer.invoke('desktop:close-editor', typeof seq === 'number' ? seq : undefined),
   cellEditorReady: () => ipcRenderer.invoke('desktop:cell-editor-ready'),
