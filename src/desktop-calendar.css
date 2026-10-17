@@ -275,12 +275,11 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .day-cell .cell-hours > .calendar-event.class-event:hover { height:auto !important; z-index:6; overflow:visible; box-shadow:0 4px 14px #0007; }
 
 /* 固定高度的完成栏：完成的日程缩成小标签，放不下的收成 +N */
-.day-cell .done-bar { flex:none; height:20px; display:flex; flex-wrap:wrap; align-content:flex-start; gap:3px; overflow:hidden; padding-top:3px; border-top:1px dashed #ffffff26; }
-.desktop-calendar[data-span='focus'] .day-cell.today .done-bar { height:42px; }
-.day-cell .done-bar > .calendar-event { min-height:15px; max-width:100%; padding:0 5px; font-size:9px; line-height:15px; gap:3px; flex:0 1 auto; }
+.day-cell .done-bar { flex:none; height:118px; display:flex; flex-direction:column; flex-wrap:nowrap; gap:2px; overflow:hidden; padding-top:3px; border-top:1px dashed #ffffff26; }
+.day-cell .done-bar > .calendar-event { min-height:15px; max-width:100%; padding:0 5px; font-size:9px; line-height:15px; gap:3px; flex:none; }
 .day-cell .done-bar > .calendar-event i, .day-cell .done-bar > .calendar-event small, .day-cell .done-bar > .calendar-event .event-notes, .day-cell .done-bar > .calendar-event svg { display:none; }
 .day-cell .done-bar > .calendar-event span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.day-cell .done-bar .done-more { font-size:9px; line-height:15px; padding:0 5px; border-radius:4px; color:#dfe6f2; background:#ffffff22; cursor:default; }
+.day-cell .done-bar .done-more { align-self:flex-start; font-size:9px; line-height:15px; padding:0 5px; border-radius:4px; color:#dfe6f2; background:#ffffff22; cursor:default; }
 /* 未完成的放不下时：紧凑的一行行 */
 .day-cell .cell-tasks.compact > .calendar-event { min-height:15px; padding:0 5px; font-size:9px; line-height:15px; }
 .day-cell .cell-tasks.compact > .calendar-event .event-notes, .day-cell .cell-tasks.compact > .calendar-event svg { display:none; }

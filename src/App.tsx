@@ -735,6 +735,8 @@ function DoneBar({children}:{children:ReactNode}){
   const [hidden,setHidden]=useState<string[]>([]);
   const measure=useCallback(()=>{
     const element=box.current;if(!element)return;
+    // 固定 6–7 行高，格子太矮时最多占四成。
+    const parent=element.parentElement;element.style.height=parent&&parent.clientHeight?`${Math.min(118,Math.max(36,Math.floor(parent.clientHeight*0.4)))}px`:'';
     const items=Array.from(element.querySelectorAll<HTMLElement>(':scope>.calendar-event'));
     const more=element.querySelector<HTMLElement>(':scope>.done-more');
     for(const item of items)item.style.display='';
@@ -742,9 +744,11 @@ function DoneBar({children}:{children:ReactNode}){
     const limit=element.getBoundingClientRect().bottom;
     let fit=items.length;
     if(items.some(item=>item.getBoundingClientRect().bottom>limit+0.5)){
+      // 先全部收起只留 +N，再一条条放回，直到 +N 碰到底。
       if(more)more.style.display='';
+      for(const item of items)item.style.display='none';
       fit=0;
-      while(fit<items.length){items[fit].style.display='';if(items[fit].getBoundingClientRect().bottom>limit+0.5||(more&&more.getBoundingClientRect().bottom>limit+0.5))break;fit++;}
+      while(fit<items.length){items[fit].style.display='';if((more?more.getBoundingClientRect().bottom:items[fit].getBoundingClientRect().bottom)>limit+0.5){items[fit].style.display='none';break;}fit++;}
     }
     items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
     if(more)more.style.display=fit<items.length?'':'none';

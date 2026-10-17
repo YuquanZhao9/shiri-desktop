@@ -121,7 +121,8 @@ test('周次任务：四格选三格完成、达标、撤销、安排、历史�
   assert.equal(due[0].at, new Date(2026, 9, 16, 19, 0).getTime());
   assert.match(due[0].body, /健身还差 3 次，德语学习还差 2 次/);
   assert.deepEqual(w.goalReminders(goals, [], new Date(2026, 9, 16, 20).getTime()), []);
-  assert.deepEqual(w.mergeItems(marks, w.addMark(marks, 'de', '2026-10-15', true, 'm4')), w.mergeItems(w.addMark(marks, 'de', '2026-10-15', true, 'm4'), marks));
+  const withM4 = w.addMark(marks, 'de', '2026-10-15', true, 'm4');
+  assert.deepEqual(w.mergeItems(marks, withM4), w.mergeItems(withM4, marks));
   assert.throws(() => w.validateGoal({ ...goals[0], slots: 2 }));
   const backup = validateBackup({ ...defaultData(), goals, goalMarks: marks });
   assert.equal(backup.goals?.length, 2);
