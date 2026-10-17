@@ -267,3 +267,9 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 .desktop-calendar .cell-axis > span:last-child { transform:translateY(-100%); }
 /* 完成了的事情统一一种颜色 */
 .desktop-calendar .calendar-event.done { --event-color:#6F7FA0 !important; }
+
+/* 课程：课名、时间、备注都换行显示完整，不再截断；放不下时鼠标停上去自动撑开 */
+.day-cell .cell-hours > .calendar-event.class-event { flex-wrap:wrap; align-content:flex-start; line-height:1.25; padding:2px 4px; }
+.day-cell .cell-hours > .calendar-event.class-event > span { flex:1 1 auto; min-width:0; white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:anywhere; }
+.day-cell .cell-hours > .calendar-event.class-event .class-note { flex-basis:100%; font-style:normal; font-size:.88em; font-weight:400; opacity:.85; white-space:normal; overflow-wrap:anywhere; }
+.day-cell .cell-hours > .calendar-event.class-event:hover { height:auto !important; z-index:6; overflow:visible; box-shadow:0 4px 14px #0007; }

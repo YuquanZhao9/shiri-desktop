@@ -220,7 +220,7 @@ svg { flex-shrink: 0; }
 .tt-hours { position: relative; }
 .tt-hours span { position: absolute; right: 5px; transform: translateY(-50%); font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tt-hours span:first-child { transform: none; }
-.tt-col { position: relative; border-left: 1px solid var(--line); background-image: linear-gradient(var(--line) 1px, transparent 1px); background-size: 100% 54px; }
+.tt-col { position: relative; border-left: 1px solid var(--line); background-image: linear-gradient(var(--line) 1px, transparent 1px); background-size: 100% 72px; }
 .tt-col.now { background-color: color-mix(in srgb, var(--accent) 5%, transparent); }
 .tt-slot { position: absolute; margin-left: 1px; border-radius: 6px; padding: 3px; text-align: left; overflow: hidden; display: flex; flex-direction: column; gap: 1px; background: color-mix(in srgb, var(--c) 18%, var(--card)); border: 1.5px solid color-mix(in srgb, var(--c) 70%, transparent); color: color-mix(in srgb, var(--c) 72%, #1d2030); }
 .tt-slot.dashed { border-style: dashed; background: color-mix(in srgb, var(--c) 7%, var(--card)); }
@@ -441,3 +441,12 @@ svg { flex-shrink: 0; }
 .weight-days small { width: 44px; text-align: right; font-size: 12px; color: var(--muted); }
 .weight-days small.up { color: #d0674f; }
 .weight-days small.down { color: #3fa66b; }
+
+/* 课表页：课名、时间、备注换行显示完整 */
+.tt-slot b { font-size: 10.5px; overflow-wrap: anywhere; word-break: normal; }
+.tt-slot small { font-size: 9px; line-height: 1.2; overflow-wrap: anywhere; }
+.tt-slot .tt-note { opacity: .7; }
+/* 课表页：每天至少 120px 宽，放不下就左右滑动，同一时间两门课也能看全 */
+.tt { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.tt-head, .tt-body { min-width: calc(38px + var(--days) * 120px); }
+.tt-head > span:first-child, .tt-hours { position: sticky; left: 0; z-index: 2; background: var(--card); }

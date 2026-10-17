@@ -935,7 +935,7 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
   const first = all.length ? Math.min(...all.map(s => toMin(s.start))) : 8 * 60;
   const last = all.length ? Math.max(...all.map(s => toMin(s.end))) : 18 * 60;
   const from = Math.floor(first / 60) * 60, to = Math.ceil(last / 60) * 60;
-  const px = 0.9; // 每分钟高度
+  const px = 1.2; // 每分钟高度（够放下课名、时间和备注）
   const todayDay = today >= timetable.start && today <= timetable.end ? (parseDate(today).getDay() + 6) % 7 + 1 : 0;
   const [open, setOpen] = useState<TimetableSlot | null>(null);
   return (
@@ -952,7 +952,7 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
                 {lanes(slotsForWeekday(timetable, d + 1)).map(({ slot, lane, lanes: count }) => (
                   <button key={slot.id} className={`tt-slot${slot.dashed ? ' dashed' : ''}`} onClick={() => setOpen(slot)}
                     style={{ '--c': slot.color, top: (toMin(slot.start) - from) * px, height: (toMin(slot.end) - toMin(slot.start)) * px - 2, left: `${lane / count * 100}%`, width: `calc(${100 / count}% - 2px)` } as React.CSSProperties}>
-                    <b>{slot.title}</b><small>{slot.start}</small>
+                    <b>{slot.title}</b><small>{slot.start}–{slot.end}</small>{slot.note && <small className="tt-note">{slot.note}</small>}
                   </button>
                 ))}
               </div>
