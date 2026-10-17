@@ -230,3 +230,18 @@ test('测体重：读数字、记下改掉删掉、合并、08:00 没记才提�
   assert.deepEqual(w.weightReminders([], 1, new Date(2026, 9, 17, 9, 0).getTime()), []);
   assert.equal(validateBackup({ ...defaultData(), weights: list }).weights?.length, 2);
 });
+
+test('完成的日程放到当天最下面、不显示时间，取消完成回到原位', async () => {
+  const { dayAgenda, doneToBottom, cellLayout } = await import('../src/timetable');
+  const { doneLast } = await import('../src/core');
+  const t = '2026-10-01T08:00:00.000Z';
+  const mk = (id: string, time: string, completed: boolean) => ({ id, title: id, date: '2026-10-18', time, duration: 60, listId: 'work', notes: '', priority: 'normal' as const, repeat: 'none' as const, completed, doneDates: [], createdAt: t, updatedAt: t });
+  const tasks = [mk('a', '09:00', true), mk('b', '10:00', false), mk('c', '', false)];
+  const items = doneToBottom(dayAgenda(tasks, null), task => task.completed);
+  assert.deepEqual(items.map(i => i.kind === 'task' ? [i.task.id, i.time] : null), [['b', '10:00'], ['c', ''], ['a', '']]);
+  const layout = cellLayout(items);
+  assert.deepEqual(layout.timed.map(p => p.item.kind === 'task' && p.item.task.id), ['b']);
+  assert.deepEqual(layout.untimed.map(i => i.kind === 'task' && i.task.id), ['c', 'a']);
+  assert.equal(tasks[0].time, '09:00', '日程本身的时间不变');
+  assert.deepEqual(doneLast(tasks, '2026-10-18').map(x => x.id), ['b', 'c', 'a']);
+});

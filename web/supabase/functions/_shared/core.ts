@@ -114,6 +114,11 @@ export function moveTask(task: Task, oldDate: string, newDate: string, time?: st
   return moved;
 }
 
+/** 当天列表：完成的放到最后（同组里仍按原顺序）。 */
+export function doneLast(tasks: Task[], key: string): Task[] {
+  return [...tasks.filter(task => !isDone(task, key)), ...tasks.filter(task => isDone(task, key))];
+}
+
 export function tasksForDate(tasks: Task[], key: string): Task[] {
   // By start time; untimed (all-day) entries go last.
   return tasks.filter(task => occursOn(task, key)).sort((a, b) =>

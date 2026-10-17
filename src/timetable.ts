@@ -224,3 +224,13 @@ export function cellLayout(items: AgendaItem[], minHeight = 0.06): { timed: Plac
   close();
   return { timed, untimed };
 }
+
+/**
+ * 完成的日程放到当天最下面、不再按时间排（只改显示，日程本身的时间不变）：
+ * 把它们的显示时间清空并排到最后；取消完成后自然回到原来的位置。
+ */
+export function doneToBottom(items: AgendaItem[], isDone: (task: Task) => boolean): AgendaItem[] {
+  const open: AgendaItem[] = [], done: AgendaItem[] = [];
+  for (const item of items) (item.kind === 'task' && isDone(item.task) ? done : open).push(item.kind === 'task' && isDone(item.task) ? { ...item, time: '' } : item);
+  return [...open, ...done];
+}

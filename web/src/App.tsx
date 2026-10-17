@@ -4,7 +4,7 @@ import { Bell, BookOpen, CalendarDays, Copy, GraduationCap, KeyRound, Check, Che
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
-import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
+import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, doneToBottom, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
 import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
@@ -80,6 +80,8 @@ export default function App() {
   const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
   const [goalReminder, setGoalReminder] = useState(() => pref('shiri-goal-reminder', '1') !== '0');
   const [weightReminder, setWeightReminder] = useState(() => pref('shiri-weight-reminder', '1') !== '0');
+  // 完成的日程放到当天最下面、不显示时间（我的 → 日程显示 里可关）。
+  const [doneBottom, setDoneBottom] = useState(() => pref('shiri-done-bottom', '1') !== '0');
   const [weightOpen, setWeightOpen] = useState(false);
   const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [markOpen, setMarkOpen] = useState<string | null>(null);
@@ -361,7 +363,7 @@ export default function App() {
   const monthLabel = `${cursor.year}年${cursor.month + 1}月`;
 
   // ---------- 界面 ----------
-  const row = (task: Task, date: string, showDate = false) => {
+  const row = (task: Task, date: string, showDate = false, hideTime = false) => {
     const done = date ? isDone(task, date) : task.completed;
     const list = listOf(task.listId);
     return (
@@ -371,7 +373,7 @@ export default function App() {
           <span className="task-title">{task.priority === 'high' && <Star className="flag" size={14} fill="currentColor" aria-label="星标" />}{task.title}</span>
           <span className="task-meta">
             {showDate && date && <span>{shortDay(date)}</span>}
-            <span>{task.time ? `${task.time}–${endTime(task.time, task.duration)}` : (date ? '全天' : '未安排日期')}</span>
+            <span>{task.time && !hideTime ? `${task.time}–${endTime(task.time, task.duration)}` : hideTime ? '已完成' : (date ? '全天' : '未安排日期')}</span>
             {task.repeat !== 'none' && <span className="meta-icon"><Repeat2 size={12} />{REPEATS[task.repeat]}</span>}
             <span className="dot" />{list.name}
           </span>
@@ -416,7 +418,8 @@ export default function App() {
     );
   };
   // 测体重：今天和以前的日子可以填（补记），以后的日子不显示。
-  const selectedAgenda = dayAgenda(dayTasks, classRows(selected), [], selected <= today ? { time: WEIGHT_TIME, date: selected, kg: weightOn(data.weights, selected)?.kg } : undefined);
+  const selectedAgendaRaw = dayAgenda(dayTasks, classRows(selected), [], selected <= today ? { time: WEIGHT_TIME, date: selected, kg: weightOn(data.weights, selected)?.kg } : undefined);
+  const selectedAgenda = doneBottom ? doneToBottom(selectedAgendaRaw, task => isDone(task, selected)) : selectedAgendaRaw;
 
   const calendar = (
     <section className="page calendar-page">
@@ -440,7 +443,8 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const layout = cellLayout(dayAgenda(tasks, classRows(key), [], key === today || weightOn(data.weights, key) ? { time: WEIGHT_TIME, date: key, kg: weightOn(data.weights, key)?.kg } : undefined));
+          const agenda = dayAgenda(tasks, classRows(key), [], key === today || weightOn(data.weights, key) ? { time: WEIGHT_TIME, date: key, kg: weightOn(data.weights, key)?.kg } : undefined);
+          const layout = cellLayout(doneBottom ? doneToBottom(agenda, task => isDone(task, key)) : agenda);
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
@@ -470,7 +474,7 @@ export default function App() {
           <input value={quick} onChange={e => setQuick(e.target.value)} placeholder="添加日程，如“15:00 开会”" enterKeyHint="done" maxLength={200} />
           {quick && <button type="submit" className="quick-save">添加</button>}
         </form>
-        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : item.kind === 'weight' ? <WeightRow key="weight" date={selected} weights={data.weights} onSave={kg => saveWeight(selected, kg)} onHistory={() => setWeightOpen(true)} /> : item.kind === 'goal' ? goalRow(item.goal, item.mark) : classRow(item.slot))}</ul>
+        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected, false, doneBottom && !item.time && !!item.task.time) : item.kind === 'weight' ? <WeightRow key="weight" date={selected} weights={data.weights} onSave={kg => saveWeight(selected, kg)} onHistory={() => setWeightOpen(true)} /> : item.kind === 'goal' ? goalRow(item.goal, item.mark) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
         <WeeklyCard goals={data.goals} marks={data.goalMarks} date={selected} onManage={() => setWeeklyOpen(true)} actions={weeklyActions} />
         <button className={`diary-card${hasJournal(data.journal, selected) ? ' done' : ''}`} onClick={() => setJournalDate(selected)}>
@@ -541,6 +545,8 @@ export default function App() {
             reviewReminder={reviewReminder}
             goalReminder={goalReminder}
             weightReminder={weightReminder}
+            doneBottom={doneBottom}
+            onDoneBottom={value => { setDoneBottom(value); setPref('shiri-done-bottom', value ? '1' : '0'); }}
             onWeightReminder={async value => {
               setWeightReminder(value); setPref('shiri-weight-reminder', value ? '1' : '0');
               const sub = await currentSubscription();
@@ -733,12 +739,13 @@ interface MeProps {
   reviewReminder: boolean; onReviewReminder: (value: boolean) => void;
   goalReminder: boolean; onGoalReminder: (value: boolean) => void;
   weightReminder: boolean; onWeightReminder: (value: boolean) => void;
+  doneBottom: boolean; onDoneBottom: (value: boolean) => void;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
   passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, weightReminder, onWeightReminder, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, weightReminder, onWeightReminder, doneBottom, onDoneBottom, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetOffer, setResetOffer] = useState('');
@@ -884,6 +891,11 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
               <label className="kv"><span>周五 {GOAL_REMINDER_TIME} 周次任务还差 2 次及以上时提醒</span><input type="checkbox" className="switch" checked={goalReminder} disabled={busy} onChange={e => onGoalReminder(e.target.checked)} /></label>
             </div>
           )}
+        </div>
+
+        <div className="card">
+          <h3><CalendarDays size={17} />日程显示</h3>
+          <label className="kv"><span>完成的日程放到当天最下面（不再显示时间）</span><input type="checkbox" className="switch" checked={doneBottom} onChange={e => onDoneBottom(e.target.checked)} /></label>
         </div>
 
         <div className="card">
