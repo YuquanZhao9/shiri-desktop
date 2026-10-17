@@ -454,12 +454,19 @@ export default function App() {
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
               <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
-              {layout.untimed.length > 0 && (compact
-                ? <span className="pills">
-                    {layout.untimed.slice(0, 2).map(item => pill(item, key))}
-                    {layout.untimed.length > 2 && <span className="more">+{layout.untimed.length - 2}</span>}
-                  </span>
-                : <span className="dots untimed">{layout.untimed.slice(0, 4).map(item => item.kind === 'task' && <i key={item.task.id} style={{ background: colorOf(item.task) }} />)}</span>)}
+              {(() => {
+                const doneCount = doneBottom ? layout.untimed.filter(item => item.kind === 'task' && isDone(item.task, key)).length : 0;
+                const open = doneBottom ? layout.untimed.filter(item => !(item.kind === 'task' && isDone(item.task, key))) : layout.untimed;
+                return <>
+                  {open.length > 0 && (compact
+                    ? <span className="pills">
+                        {open.slice(0, 2).map(item => pill(item, key))}
+                        {open.length > 2 && <span className="more">+{open.length - 2}</span>}
+                      </span>
+                    : <span className="dots untimed">{open.slice(0, 4).map(item => item.kind === 'task' && <i key={item.task.id} style={{ background: colorOf(item.task) }} />)}</span>)}
+                  {doneCount > 0 && <span className="done-mark">✓{doneCount}</span>}
+                </>;
+              })()}
             </button>
           );
         })}
