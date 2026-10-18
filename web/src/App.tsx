@@ -13,7 +13,7 @@ import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLi
 import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
 import { Review } from './Review';
 import { WeightHistorySheet, WeightRow } from './Weight';
-import { setWeight, WEIGHT_TIME, weightOn } from '@shared/weight';
+import { setWeight, WEIGHT_TIME, weightHistory, weightOn } from '@shared/weight';
 import { GoalMarkSheet, WeeklyCard, WeeklySheet } from './Weekly';
 import type { WeeklyActions } from './Weekly';
 import { ClassSheet, ReviewClassCard } from './Classes';
@@ -418,7 +418,7 @@ export default function App() {
     );
   };
   // 测体重：今天和以前的日子可以填（补记），以后的日子不显示。
-  const selectedAgendaRaw = dayAgenda(dayTasks, classRows(selected), [], selected <= today ? { time: WEIGHT_TIME, date: selected, kg: weightOn(data.weights, selected)?.kg } : undefined);
+  const selectedAgendaRaw = dayAgenda(dayTasks, classRows(selected), [], selected <= today && !weightOn(data.weights, selected) ? { time: WEIGHT_TIME, date: selected } : undefined);
   const selectedAgenda = doneBottom ? doneToBottom(selectedAgendaRaw, task => isDone(task, selected)) : selectedAgendaRaw;
 
   const calendar = (
@@ -443,7 +443,7 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const agenda = dayAgenda(tasks, classRows(key), [], key === today || weightOn(data.weights, key) ? { time: WEIGHT_TIME, date: key, kg: weightOn(data.weights, key)?.kg } : undefined);
+          const agenda = dayAgenda(tasks, classRows(key), [], key === today && !weightOn(data.weights, key) ? { time: WEIGHT_TIME, date: key } : undefined);
           const layout = cellLayout(doneBottom ? doneToBottom(agenda, task => isDone(task, key)) : agenda);
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
@@ -553,6 +553,8 @@ export default function App() {
             goalReminder={goalReminder}
             weightReminder={weightReminder}
             doneBottom={doneBottom}
+            onWeightHistory={() => setWeightOpen(true)}
+            latestWeight={weightHistory(data.weights)[0] ? `${weightHistory(data.weights)[0].kg.toFixed(1)} kg` : ''}
             onDoneBottom={value => { setDoneBottom(value); setPref('shiri-done-bottom', value ? '1' : '0'); }}
             onWeightReminder={async value => {
               setWeightReminder(value); setPref('shiri-weight-reminder', value ? '1' : '0');
@@ -747,12 +749,13 @@ interface MeProps {
   goalReminder: boolean; onGoalReminder: (value: boolean) => void;
   weightReminder: boolean; onWeightReminder: (value: boolean) => void;
   doneBottom: boolean; onDoneBottom: (value: boolean) => void;
+  onWeightHistory: () => void; latestWeight: string;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
   passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, weightReminder, onWeightReminder, doneBottom, onDoneBottom, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, weightReminder, onWeightReminder, doneBottom, onDoneBottom, onWeightHistory, latestWeight, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetOffer, setResetOffer] = useState('');
@@ -902,6 +905,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
 
         <div className="card">
           <h3><CalendarDays size={17} />日程显示</h3>
+          <button className="secondary wide" onClick={onWeightHistory}>体重记录{latestWeight ? `（最近 ${latestWeight}）` : ''}</button>
           <label className="kv"><span>完成的日程放到当天最下面（不再显示时间）</span><input type="checkbox" className="switch" checked={doneBottom} onChange={e => onDoneBottom(e.target.checked)} /></label>
         </div>
 

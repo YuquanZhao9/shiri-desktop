@@ -213,7 +213,8 @@ let application;
   await weightPage.locator('.weight-input input').fill('72.5');
   await weightPage.locator('.weight-input input').press('Enter').catch(() => {});
   await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).weights || []).some(item => item.kg === 72.5), null, { timeout: 5000 });
-  await page.waitForSelector('.day-cell.today .weight-event.done', { state: 'attached' });
+  // Once recorded, 测体重 disappears from the calendar (the number stays in 体重).
+  await page.waitForSelector('.day-cell.today .weight-event', { state: 'detached' });
   // Back to the fortnight that the checks below expect.
   await page.getByRole('button', { name: '两周' }).click();
   for (let step = 0; step < 30 && !(await page.locator('[data-date="2026-10-12"]').count()); step++) await page.getByRole('button', { name: (await page.locator('[data-date]').first().getAttribute('data-date')) < '2026-10-12' ? '下一段' : '上一段' }).click();
