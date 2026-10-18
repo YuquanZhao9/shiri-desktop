@@ -55,8 +55,8 @@ export async function writeSaved(key:string,value:string) {
   try { await next; }
   finally { if(pendingWrites.get(key)===next)pendingWrites.delete(key); }
 }
-// 默认每个日程提前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。
-export const MULTI_REMINDER_LEADS=[120,60,30,10];
+// 默认每个日程提前 2 小时、1 小时、10 分钟各提醒一次（2026-10-18 用户要求去掉 30 分钟）。
+export const MULTI_REMINDER_LEADS=[120,60,10];
 export function leadLabel(minutes:number) {
   return minutes>=60&&minutes%60===0?`${minutes/60} 小时`:`${minutes} 分钟`;
 }

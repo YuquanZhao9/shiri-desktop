@@ -71,12 +71,13 @@ test('快速添加识别开头的时间', async () => {
   assert.deepEqual(parseQuick('25:00 错'), { title: '25:00 错', time: '' });
 });
 
-test('cloud push reminds 2 h, 1 h, 30 min and 10 min before, once each', () => {
+test('cloud push reminds 2 h, 1 h and 10 min before, once each (no 30 min)', () => {
   const task = { id: 'multi', title: '多次提醒', date: '2026-09-14', time: '12:00', repeat: 'none', completed: false, doneDates: [] };
   const at = zonedTime('2026-09-14', '12:00', 'Europe/Berlin');
-  const fired = [120, 60, 30, 10].map(lead => dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - lead * 60_000));
-  assert.deepEqual(fired.map(due => due.length), [1, 1, 1, 1]);
-  assert.equal(new Set(fired.map(due => due[0].occurrence)).size, 4);
+  const fired = [120, 60, 10].map(lead => dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - lead * 60_000));
+  assert.deepEqual(fired.map(due => due.length), [1, 1, 1]);
+  assert.equal(new Set(fired.map(due => due[0].occurrence)).size, 3);
+  assert.equal(dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - 30 * 60_000).length, 0, 'no 30-minute push');
   assert.match(fired[0][0].body, /2 小时后开始/);
   assert.equal(dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - 45 * 60_000).length, 0);
 });

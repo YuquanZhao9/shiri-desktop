@@ -894,7 +894,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
           {!VAPID_PUBLIC_KEY ? <p className="muted">云端提醒服务还没配置。</p> : !standalone ? <p className="muted">从主屏幕图标打开昱时后才能开启提醒。</p> : !pushSupported() ? <p className="muted">需要 iOS 16.4 或更高版本。</p> : (
             <div className="stack">
               <label className="kv"><span>推送到这台手机</span><input type="checkbox" className="switch" checked={pushOn} disabled={busy || !user} onChange={() => void togglePush()} /></label>
-              <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
+              <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
               <label className="kv"><span>{JOURNAL_REMINDER_TIME} 还没写日记时提醒</span><input type="checkbox" className="switch" checked={journalReminder} disabled={busy} onChange={e => onJournalReminder(e.target.checked)} /></label>
               <label className="kv"><span>每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总</span><input type="checkbox" className="switch" checked={reviewReminder} disabled={busy} onChange={e => onReviewReminder(e.target.checked)} /></label>
               <label className="kv"><span>每天 {WEIGHT_TIME} 还没记体重时提醒</span><input type="checkbox" className="switch" checked={weightReminder} disabled={busy} onChange={e => onWeightReminder(e.target.checked)} /></label>

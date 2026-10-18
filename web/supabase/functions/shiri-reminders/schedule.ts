@@ -77,8 +77,8 @@ function shiftKey(key: string, days: number): string {
  * 找出此刻该推送的提醒：提醒时刻（日程时间减提前量）落在 (now - lookback, now + ahead]。
  * 定时任务每分钟跑一次；lookback 覆盖偶尔延迟或漏跑的那一两分钟，重复由已发送表挡住。
  */
-/** 默认每个日程提前 2 小时、1 小时、30 分钟、10 分钟各推送一次（与桌面版一致）。 */
-export const MULTI_LEADS = [120, 60, 30, 10];
+/** 默认每个日程提前 2 小时、1 小时、10 分钟各推送一次（与桌面版一致）。 */
+export const MULTI_LEADS = [120, 60, 10];
 
 const leadText = (minutes: number) => minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
 
@@ -94,7 +94,7 @@ export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinute
       const at = zonedTime(day, task.time, timeZone);
       // 日程开始后就不再补发。
       if (at < now - 60_000) continue;
-      // 只发最近到点的一条：漏跑几分钟后不会把 30 分钟和 10 分钟的提醒同时推出来。
+      // 只发最近到点的一条：漏跑几分钟后不会把 1 小时和 10 分钟的提醒同时推出来。
       const fired = leads.filter(lead => { const fire = at - lead * 60_000; return fire > now - lookbackMs && fire <= now + aheadMs; });
       if (!fired.length) continue;
       const lead = Math.min(...fired);
