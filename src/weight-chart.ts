@@ -3,9 +3,9 @@ import { weightHistory, weightSeries } from './weight';
 
 // 体重折线图的坐标：横轴是日期（按真实天数排开），纵轴是 kg。电脑和手机各自画 SVG，坐标在这里算好。
 
-export type WeightRange = 30 | 90 | 365 | 0;
+export type WeightRange = 7 | 30 | 90 | 365 | 0;
 export const WEIGHT_RANGES: { days: WeightRange; label: string }[] = [
-  { days: 30, label: '30 天' }, { days: 90, label: '3 个月' }, { days: 365, label: '1 年' }, { days: 0, label: '全部' },
+  { days: 7, label: '7 天' }, { days: 30, label: '30 天' }, { days: 90, label: '3 个月' }, { days: 365, label: '1 年' }, { days: 0, label: '全部' },
 ];
 
 export interface WeightChartBox { width: number; height: number; left: number; right: number; top: number; bottom: number }
@@ -44,7 +44,8 @@ export function weightChart(list: WeightEntry[] | undefined, today: string, days
   const yTicks: WeightChartModel['yTicks'] = [];
   for (let kg = low; kg <= high + 1e-9; kg += step) yTicks.push({ kg, y: y(kg) });
   const xTicks: WeightChartModel['xTicks'] = [];
-  const count = 4;
+  // 7 天时每天一个刻度，其他范围 5 个刻度。
+  const count = days === 7 ? 6 : 4;
   for (let i = 0; i <= count; i++) { const date = keyOf(Math.round(start + (end - start) * i / count)); if (!xTicks.some(t => t.date === date)) xTicks.push({ date, label: shortDate(date), x: x(date) }); }
   return { points, yTicks, xTicks, line: points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '), min, max, first: series[0], last: series[series.length - 1] };
 }

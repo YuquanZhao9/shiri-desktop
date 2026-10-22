@@ -23,7 +23,7 @@ export function WeightEditor({ date, weights, onSave, onClose }: { date: string;
   </form>;
 }
 
-/** 体重折线图：横轴日期，纵轴 kg；可切换 30 天 / 3 个月 / 1 年 / 全部。 */
+/** 体重折线图：横轴日期，纵轴 kg；可切换 7 天 / 30 天 / 3 个月 / 1 年 / 全部。 */
 export function WeightChart({ weights, today, compact = false }: { weights?: WeightEntry[]; today: string; compact?: boolean }) {
   const [range, setRange] = useState<WeightRange>(() => { try { const raw = localStorage.getItem('shiri-weight-range'); const v = Number(raw); return raw !== null && WEIGHT_RANGES.some(r => r.days === v) ? v as WeightRange : 90; } catch { return 90; } });
   const pick = (days: WeightRange) => { setRange(days); try { localStorage.setItem('shiri-weight-range', String(days)); } catch { /* ignore */ } };

@@ -27,3 +27,11 @@ test('weight chart handles no data, one point and the whole history', () => {
   assert.equal(all.points[0].x, 30);
   assert.equal(weightChart([entry('2025-01-01', 80), entry('2026-10-21', 70)], '2026-10-21', 30, box).points.length, 1);
 });
+
+test('weight chart 7-day range labels every day and drops older points', () => {
+  const week = weightChart([entry('2026-10-14', 72), entry('2026-10-15', 71.8), entry('2026-10-21', 71.2)], '2026-10-21', 7, box);
+  assert.equal(week.points.length, 2);
+  assert.equal(week.xTicks.length, 7);
+  assert.equal(week.xTicks[0].label, '10/15');
+  assert.equal(week.xTicks[6].label, '10/21');
+});
