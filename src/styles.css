@@ -228,7 +228,14 @@
 .weight-view{display:flex;flex-direction:column;gap:12px}
 .weight-view .list-view-title h2{display:flex;align-items:center;gap:7px}
 .weight-today{margin-left:auto;padding:6px 12px}
-.weight-chart{width:100%;max-width:640px;height:auto}
+.weight-chart-card{max-width:680px;border:1px solid #e6e9f0;border-radius:12px;padding:12px 14px;background:#fff}
+.weight-chart-card.compact{border:0;padding:4px 0;background:transparent}
+.weight-chart-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;font-size:13px;color:#5d6679;flex-wrap:wrap}
+.weight-ranges{display:flex;gap:2px;background:#f1f3f7;border-radius:8px;padding:2px}
+.weight-ranges button{border:0;background:transparent;padding:3px 9px;border-radius:6px;font-size:12px;color:#5d6679;cursor:pointer}
+.weight-ranges button.active{background:#fff;color:#c9822b;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.weight-chart-empty{color:#9aa3b6;font-size:13px;margin:18px 0;text-align:center}
+.weight-chart{width:100%;height:auto;display:block}
 .weight-chart polyline{fill:none;stroke:#c9822b;stroke-width:2}
 .weight-chart circle{fill:#fff;stroke:#c9822b;stroke-width:2}
 .weight-chart line{stroke:#e6e9f0}

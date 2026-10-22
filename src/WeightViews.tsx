@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Scale, Trash2 } from 'lucide-react';
 import type { WeightEntry } from './types';
 import { parseDate } from './core';
-import { parseKg, weightHistory, weightOn, weightSeries } from './weight';
+import { parseKg, weightHistory, weightOn } from './weight';
+import { weightChart, WEIGHT_RANGES, type WeightRange } from './weight-chart';
 
 const dayLabel = (key: string) => new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' }).format(parseDate(key));
 const fmt = (kg: number) => kg.toFixed(1);
@@ -22,21 +23,22 @@ export function WeightEditor({ date, weights, onSave, onClose }: { date: string;
   </form>;
 }
 
-/** 体重走势（最近 days 天的点连成线）。 */
-export function WeightChart({ weights, today, days = 60 }: { weights?: WeightEntry[]; today: string; days?: number }) {
-  const series = weightSeries(weights, today, days);
-  if (series.length < 2) return null;
-  const min = Math.min(...series.map(item => item.kg)), max = Math.max(...series.map(item => item.kg));
-  const low = Math.floor(min - 0.5), high = Math.ceil(max + 0.5);
-  const start = parseDate(series[0].date).getTime(), span = Math.max(1, parseDate(series[series.length - 1].date).getTime() - start);
-  const x = (date: string) => 24 + (parseDate(date).getTime() - start) / span * 552;
-  const y = (kg: number) => 10 + (high - kg) / (high - low) * 120;
-  return <svg className="weight-chart" viewBox="0 0 600 150" role="img" aria-label={`最近 ${days} 天体重走势`}>
-    <text x="0" y="14">{high}</text><text x="0" y="134">{low}</text>
-    <line x1="24" x2="576" y1="130" y2="130" />
-    <polyline points={series.map(item => `${x(item.date)},${y(item.kg)}`).join(' ')} />
-    {series.map(item => <circle key={item.id} cx={x(item.date)} cy={y(item.kg)} r="3"><title>{`${item.date} ${fmt(item.kg)} kg`}</title></circle>)}
-  </svg>;
+/** 体重折线图：横轴日期，纵轴 kg；可切换 30 天 / 3 个月 / 1 年 / 全部。 */
+export function WeightChart({ weights, today, compact = false }: { weights?: WeightEntry[]; today: string; compact?: boolean }) {
+  const [range, setRange] = useState<WeightRange>(() => { try { const raw = localStorage.getItem('shiri-weight-range'); const v = Number(raw); return raw !== null && WEIGHT_RANGES.some(r => r.days === v) ? v as WeightRange : 90; } catch { return 90; } });
+  const pick = (days: WeightRange) => { setRange(days); try { localStorage.setItem('shiri-weight-range', String(days)); } catch { /* ignore */ } };
+  const box = { width: 600, height: compact ? 170 : 220, left: 34, right: 12, top: 12, bottom: 24 };
+  const chart = weightChart(weights, today, range, box);
+  const change = chart.first && chart.last && chart.first.id !== chart.last.id ? chart.last.kg - chart.first.kg : null;
+  return <div className={`weight-chart-card${compact ? ' compact' : ''}`}>
+    <div className="weight-chart-head"><span>{change === null ? '体重走势' : `这段时间 ${change > 0 ? '+' : change < 0 ? '−' : '±'}${fmt(Math.abs(change))} kg`}</span><div className="weight-ranges">{WEIGHT_RANGES.map(r => <button key={r.days} type="button" className={range === r.days ? 'active' : ''} onClick={() => pick(r.days)}>{r.label}</button>)}</div></div>
+    {chart.points.length ? <svg className="weight-chart" viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label="体重随日期变化的折线图">
+      {chart.yTicks.map(t => <g key={t.kg}><line x1={box.left} x2={box.width - box.right} y1={t.y} y2={t.y} /><text x={box.left - 6} y={t.y + 4} textAnchor="end">{t.kg}</text></g>)}
+      {chart.xTicks.map(t => <text key={t.date} x={t.x} y={box.height - 6} textAnchor={t.x < box.left + 20 ? 'start' : t.x > box.width - box.right - 20 ? 'end' : 'middle'}>{t.label}</text>)}
+      {chart.points.length > 1 && <polyline points={chart.line} />}
+      {chart.points.map(p => <circle key={p.id} cx={p.x} cy={p.y} r={chart.points.length > 60 ? 2 : 3}><title>{`${dayLabel(p.date)} ${fmt(p.kg)} kg`}</title></circle>)}
+    </svg> : <p className="weight-chart-empty">这段时间还没有体重记录</p>}
+  </div>;
 }
 
 /** 管理窗口“体重”页：走势和每天的记录。 */

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Scale } from 'lucide-react';
 import type { WeightEntry } from '@shared/types';
 import { parseDate } from '@shared/core';
-import { parseKg, WEIGHT_TIME, weightHistory, weightOn, weightSeries } from '@shared/weight';
+import { parseKg, WEIGHT_TIME, weightHistory, weightOn } from '@shared/weight';
+import { weightChart, WEIGHT_RANGES, type WeightRange } from '@shared/weight-chart';
 
 const dayLabel = (key: string) => new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric', weekday: 'short' }).format(parseDate(key));
 
@@ -29,18 +30,31 @@ export function WeightRow({ date, weights, onSave, onHistory }: { date: string; 
   );
 }
 
-/** 体重记录：最近 30 天走势和每天的数字。 */
+/** 体重折线图：横轴日期，纵轴 kg，可切换 30 天 / 3 个月 / 1 年 / 全部。 */
+export function WeightChart({ weights, today }: { weights?: WeightEntry[]; today: string }) {
+  const [range, setRange] = useState<WeightRange>(() => { try { const raw = localStorage.getItem('shiri-weight-range'); const v = Number(raw); return raw !== null && WEIGHT_RANGES.some(r => r.days === v) ? v as WeightRange : 90; } catch { return 90; } });
+  const pick = (days: WeightRange) => { setRange(days); try { localStorage.setItem('shiri-weight-range', String(days)); } catch { /* ignore */ } };
+  const box = { width: 350, height: 180, left: 30, right: 8, top: 10, bottom: 22 };
+  const chart = weightChart(weights, today, range, box);
+  const change = chart.first && chart.last && chart.first.id !== chart.last.id ? chart.last.kg - chart.first.kg : null;
+  return (
+    <div className="weight-chart-box">
+      <div className="weight-chart-head"><span>{change === null ? '体重走势' : `这段时间 ${change > 0 ? '+' : change < 0 ? '−' : '±'}${Math.abs(change).toFixed(1)} kg`}</span></div>
+      <div className="weight-ranges">{WEIGHT_RANGES.map(r => <button key={r.days} className={range === r.days ? 'active' : ''} onClick={() => pick(r.days)}>{r.label}</button>)}</div>
+      {chart.points.length ? <svg className="weight-chart" viewBox={`0 0 ${box.width} ${box.height}`} role="img" aria-label="体重随日期变化的折线图">
+        {chart.yTicks.map(t => <g key={t.kg}><line x1={box.left} x2={box.width - box.right} y1={t.y} y2={t.y} /><text x={box.left - 5} y={t.y + 3.5} textAnchor="end">{t.kg}</text></g>)}
+        {chart.xTicks.map(t => <text key={t.date} x={t.x} y={box.height - 5} textAnchor={t.x < box.left + 14 ? 'start' : t.x > box.width - box.right - 14 ? 'end' : 'middle'}>{t.label}</text>)}
+        {chart.points.length > 1 && <polyline points={chart.line} />}
+        {chart.points.map(p => <circle key={p.id} cx={p.x} cy={p.y} r={chart.points.length > 60 ? 1.8 : 2.8} />)}
+      </svg> : <p className="weight-chart-empty">这段时间还没有体重记录</p>}
+    </div>
+  );
+}
+
+/** 体重记录：走势和每天的数字。 */
 export function WeightHistorySheet({ weights, today, onClose }: { weights?: WeightEntry[]; today: string; onClose: () => void }) {
   const history = weightHistory(weights);
-  const series = weightSeries(weights, today, 30);
-  let chart = null;
-  if (series.length >= 2) {
-    const min = Math.min(...series.map(i => i.kg)), max = Math.max(...series.map(i => i.kg));
-    const low = Math.floor(min - 0.5), high = Math.ceil(max + 0.5);
-    const start = parseDate(series[0].date).getTime(), span = Math.max(1, parseDate(series[series.length - 1].date).getTime() - start);
-    const x = (d: string) => 22 + (parseDate(d).getTime() - start) / span * 316, y = (kg: number) => 8 + (high - kg) / (high - low) * 104;
-    chart = <svg className="weight-chart" viewBox="0 0 350 120"><text x="0" y="12">{high}</text><text x="0" y="114">{low}</text><polyline points={series.map(i => `${x(i.date)},${y(i.kg)}`).join(' ')} />{series.map(i => <circle key={i.id} cx={x(i.date)} cy={y(i.kg)} r="3" />)}</svg>;
-  }
+  const chart = <WeightChart weights={weights} today={today} />;
   return (
     <div className="sheet-layer" onClick={onClose}>
       <div className="sheet weight-sheet" onClick={e => e.stopPropagation()}>

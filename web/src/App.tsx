@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode, TouchEvent } from 'react';
-import { Bell, BookOpen, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Share, Star, Trash2, UserRound } from 'lucide-react';
+import { Bell, BookOpen, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Scale, Share, Star, Trash2, UserRound } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
@@ -12,7 +12,7 @@ import type { GermanState } from '@shared/holidays';
 import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable, syncWeekly } from './sync';
 import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
 import { Review } from './Review';
-import { WeightHistorySheet, WeightRow } from './Weight';
+import { WeightChart, WeightHistorySheet, WeightRow } from './Weight';
 import { setWeight, WEIGHT_TIME, weightHistory, weightOn } from '@shared/weight';
 import { GoalMarkSheet, WeeklyCard, WeeklySheet } from './Weekly';
 import type { WeeklyActions } from './Weekly';
@@ -903,9 +903,14 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
           )}
         </div>
 
+        <div className="card weight-card">
+          <h3><Scale size={17} />体重</h3>
+          <WeightChart weights={data.weights} today={todayKey()} />
+          <button className="secondary wide" onClick={onWeightHistory}>体重记录{latestWeight ? `（最近 ${latestWeight}）` : ''}</button>
+        </div>
+
         <div className="card">
           <h3><CalendarDays size={17} />日程显示</h3>
-          <button className="secondary wide" onClick={onWeightHistory}>体重记录{latestWeight ? `（最近 ${latestWeight}）` : ''}</button>
           <label className="kv"><span>完成的日程放到当天最下面（不再显示时间）</span><input type="checkbox" className="switch" checked={doneBottom} onChange={e => onDoneBottom(e.target.checked)} /></label>
         </div>
 
