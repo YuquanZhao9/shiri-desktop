@@ -4,7 +4,7 @@ import { Bell, BookOpen, CalendarDays, Copy, GraduationCap, KeyRound, Check, Che
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
-import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, doneToBottom, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
+import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, doneToBottom, effectiveTimetable, oneOffSlots, weekGridSlots } from '@shared/timetable';
 import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
@@ -959,7 +959,8 @@ function lanes(slots: TimetableSlot[]) {
 
 function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Timetable; today: string; visible: boolean; onVisible: (value: boolean) => void }) {
   const days = timetable.slots.some(slot => slot.day > 5) ? 7 : 5;
-  const all = timetable.slots;
+  const all = timetable.slots.filter(slot => !(slot.from && slot.from === slot.until));
+  const once = oneOffSlots(timetable, today);
   const first = all.length ? Math.min(...all.map(s => toMin(s.start))) : 8 * 60;
   const last = all.length ? Math.max(...all.map(s => toMin(s.end))) : 18 * 60;
   const from = Math.floor(first / 60) * 60, to = Math.ceil(last / 60) * 60;
@@ -977,7 +978,7 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
             <div className="tt-hours">{Array.from({ length: (to - from) / 60 + 1 }, (_, i) => <span key={i} style={{ top: i * 60 * px }}>{String(from / 60 + i).padStart(2, '0')}:00</span>)}</div>
             {Array.from({ length: days }, (_, d) => (
               <div key={d} className={`tt-col${d + 1 === todayDay ? ' now' : ''}`}>
-                {lanes(slotsForWeekday(timetable, d + 1)).map(({ slot, lane, lanes: count }) => (
+                {lanes(weekGridSlots(timetable, d + 1)).map(({ slot, lane, lanes: count }) => (
                   <button key={slot.id} className={`tt-slot${slot.dashed ? ' dashed' : ''}`} onClick={() => setOpen(slot)}
                     style={{ '--c': slot.color, top: (toMin(slot.start) - from) * px, height: (toMin(slot.end) - toMin(slot.start)) * px - 2, left: `${lane / count * 100}%`, width: `calc(${100 / count}% - 2px)` } as React.CSSProperties}>
                     <b>{slot.title}</b><small>{slot.start}–{slot.end}</small>{slot.note && <small className="tt-note">{slot.note}</small>}
@@ -987,6 +988,9 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
             ))}
           </div>
         </div>
+        {once.length > 0 && (
+          <div className="card legend"><h3>单次课程</h3>{once.map(slot => <button key={slot.id} className="legend-item once-item" onClick={() => setOpen(slot)}><i style={{ background: slot.color }} /><b>{slot.from!.slice(5).replace('-', '/')} {DAY_NAMES[slot.day - 1]}</b><span>{slot.start}–{slot.end} {slot.title}</span></button>)}</div>
+        )}
         {breaksOf(timetable).length > 0 && (
           <div className="card legend"><h3>停课期</h3>{breaksOf(timetable).map(item => <div key={item.start} className="legend-item"><b>{item.name}</b><span>{item.start.slice(5).replace('-', '/')} – {item.end.slice(5).replace('-', '/')}</span></div>)}</div>
         )}
@@ -997,7 +1001,7 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
       </div>
       {open && (
         <div className="toast slot-detail" onClick={() => setOpen(null)}>
-          <span><b>{open.title}</b> · {DAY_NAMES[open.day - 1]} {open.start}–{open.end}{open.note ? `\n${open.note}` : ''}</span>
+          <span><b>{open.title}</b> · {open.from && open.from === open.until ? `${open.from.slice(5).replace('-', '/')} ` : ''}{DAY_NAMES[open.day - 1]} {open.start}–{open.end}{open.note ? `\n${open.note}` : ''}</span>
           <button>好</button>
         </div>
       )}

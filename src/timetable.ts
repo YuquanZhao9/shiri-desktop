@@ -116,6 +116,21 @@ export function newerTimetable(a: Timetable | undefined, b: Timetable | undefine
   return JSON.stringify(a) >= JSON.stringify(b) ? a : b;
 }
 
+/** A class that happens on one date only (first date = last date), e.g. a workshop of a block course. */
+export function isOneOff(slot: TimetableSlot): boolean {
+  return !!slot.from && slot.from === slot.until;
+}
+
+/** One-off classes from a date on, in date order (shown as a dated list instead of in the weekly grid). */
+export function oneOffSlots(timetable: Timetable, from = ''): TimetableSlot[] {
+  return timetable.slots.filter(slot => isOneOff(slot) && slot.from! >= from).sort((a, b) => a.from!.localeCompare(b.from!) || a.start.localeCompare(b.start));
+}
+
+/** Weekly classes of a weekday for the week grid; one-off classes are left out (they still show on their date in the calendar). */
+export function weekGridSlots(timetable: Timetable, day: number): TimetableSlot[] {
+  return slotsForWeekday(timetable, day).filter(slot => !isOneOff(slot));
+}
+
 export function slotsForWeekday(timetable: Timetable, day: number): TimetableSlot[] {
   return timetable.slots.filter(slot => slot.day === day).sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
 }

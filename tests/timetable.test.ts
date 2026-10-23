@@ -116,3 +116,18 @@ test('date cells give 06–20 one slot per hour and squeeze 00–06 and 20–24 
   assert.deepEqual([byId.a.lane, byId.a.lanes, byId.b.lane, byId.b.lanes], [0, 2, 1, 2]);
   assert.deepEqual([byId.c.lane, byId.c.lanes], [0, 1]);
 });
+
+test('one-off classes stay on their date but leave the weekly grid', async () => {
+  const { weekGridSlots, oneOffSlots, classesForDate } = await import('../src/timetable');
+  const base = { color: '#E5534B', dashed: false, note: '' };
+  const tt = { name: 'T', start: '2026-10-12', end: '2027-02-13', courses: [], updatedAt: '2026-10-23T00:00:00.000Z', slots: [
+    { ...base, id: 'weekly', day: 4, start: '11:30', end: '13:00', title: 'SASP' },
+    { ...base, id: 'once-a', day: 4, start: '11:30', end: '13:00', title: 'iCPS A', from: '2026-11-19', until: '2026-11-19' },
+    { ...base, id: 'once-b', day: 1, start: '13:00', end: '16:00', title: 'iCPS B', from: '2026-11-16', until: '2026-11-16' },
+  ] };
+  assert.deepEqual(weekGridSlots(tt, 4).map(s => s.id), ['weekly']);
+  assert.deepEqual(oneOffSlots(tt, '2026-11-17').map(s => s.id), ['once-a']);
+  assert.deepEqual(oneOffSlots(tt).map(s => s.id), ['once-b', 'once-a']);
+  assert.deepEqual(classesForDate(tt, '2026-11-19')!.flatMap(r => r.slots.map(s => s.id)).sort(), ['once-a', 'weekly']);
+  assert.deepEqual(classesForDate(tt, '2026-11-26')!.flatMap(r => r.slots.map(s => s.id)), ['weekly']);
+});

@@ -3,7 +3,7 @@ import type { FormEvent, DragEvent, ReactNode } from 'react';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ChevronDown, Plus, Search, Settings, ListTodo, Inbox, Sun, X, Clock3, Repeat2, Trash2, ArrowUpRight, PanelRightClose, PanelRightOpen, Maximize2, Cloud, Download, Upload, Monitor, Smartphone, Bell, MoreHorizontal, CheckCheck, Circle, LogOut, RefreshCw, Menu, GraduationCap, Star, BookOpen, Lightbulb, Target, BookMarked, Scale } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, Timetable, TimetableSlot } from './types';
-import { CLASS_COLOR, DEFAULT_TIMETABLE, breaksOf, cellLayout, classesForDate, dayAgenda, dayFraction, doneToBottom, effectiveTimetable, slotsForWeekday, validateTimetable } from './timetable';
+import { CLASS_COLOR, DEFAULT_TIMETABLE, breaksOf, cellLayout, classesForDate, dayAgenda, dayFraction, doneToBottom, effectiveTimetable, oneOffSlots, weekGridSlots, validateTimetable } from './timetable';
 import type { AgendaItem } from './timetable';
 import { todayKey, dateKey, parseDate, addDays, monthDays, occursOn, isDone, toggleTask, moveTask, tasksForDate, formatLunar, validateBackup, defaultData, mergeTasks, TASK_COLORS, doneLast } from './core';
 import { createCloudClient, syncTasks, listsForTasks, cloudErrorMessage, requestPasswordReset, signIn, signUp, updatePassword } from './cloud';
@@ -796,8 +796,8 @@ function TimetableStrip({timetable,today}:{timetable:Timetable;today:string}){
   const weekday=(parseDate(today).getDay()+6)%7+1;
   const short=(key:string)=>`${Number(key.slice(5,7))}/${Number(key.slice(8,10))}`;
   return <section className="timetable-strip" aria-label="课表">
-    {[1,2,3,4,5].map(day=>{const slots=slotsForWeekday(timetable,day);return <div key={day} className={`timetable-day ${inTerm&&day===weekday?'today':''}`}>{slots.map(slot=><div key={slot.id} className={`timetable-slot ${slot.dashed?'dashed':''}`} style={{'--slot-color':slot.color} as React.CSSProperties} title={`${slot.start}–${slot.end} ${slot.title}${slot.note?` · ${slot.note}`:''}`}><small>{slot.start}</small><span>{slot.title||'未命名'}</span></div>)}{!slots.length&&<em>无课</em>}</div>;})}
-    <div className="timetable-legend"><strong>课表 · {timetable.name}<small>{short(timetable.start)}–{short(timetable.end)}{inTerm?'':today<timetable.start?' · 未开学':' · 已结束'}</small></strong>{timetable.courses.map((course,index)=><span key={index} title={course.name}><i style={{background:course.color}}/>{course.code} {course.name}</span>)}</div>
+    {[1,2,3,4,5].map(day=>{const slots=weekGridSlots(timetable,day);return <div key={day} className={`timetable-day ${inTerm&&day===weekday?'today':''}`}>{slots.map(slot=><div key={slot.id} className={`timetable-slot ${slot.dashed?'dashed':''}`} style={{'--slot-color':slot.color} as React.CSSProperties} title={`${slot.start}–${slot.end} ${slot.title}${slot.note?` · ${slot.note}`:''}`}><small>{slot.start}</small><span>{slot.title||'未命名'}</span></div>)}{!slots.length&&<em>无课</em>}</div>;})}
+    <div className="timetable-legend"><strong>课表 · {timetable.name}<small>{short(timetable.start)}–{short(timetable.end)}{inTerm?'':today<timetable.start?' · 未开学':' · 已结束'}</small></strong>{timetable.courses.map((course,index)=><span key={index} title={course.name}><i style={{background:course.color}}/>{course.code} {course.name}</span>)}{oneOffSlots(timetable,today).slice(0,4).map(slot=><span key={slot.id} className="timetable-once" title={`${slot.from} ${slot.start}–${slot.end} ${slot.title}${slot.note?` · ${slot.note}`:''}`}><i style={{background:slot.color}}/>{short(slot.from!)} {slot.start} {slot.title}</span>)}</div>
   </section>;
 }
 
