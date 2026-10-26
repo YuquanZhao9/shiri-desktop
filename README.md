@@ -59,6 +59,16 @@ npm test
 npm run build
 ```
 
+完整测试（GitHub 上每次推送和 PR 也会自动跑，见 `.github/workflows/test.yml`）：
+
+```powershell
+npm ci --prefix web          # 第一次需要
+npx playwright install chromium   # 第一次需要
+npm run test:all             # = test:unit（桌面版 + 手机网页版 + 云函数）+ test:e2e
+```
+
+`test:e2e` 用 Playwright 在浏览器里打开桌面版（5173）和手机网页版（5180，iPhone 尺寸），时间固定在 2026-10-26 07:30 柏林时间，只用本机数据，所有外网请求都被拦截；同步逻辑的单元测试用 `tests/fake-supabase.ts` 里的内存假云端，不连真实 Supabase，也不需要 `.env.local`。
+
 主要目录：`src/` 为共享界面和业务逻辑，`desktop/` 为 Windows 外壳和提醒服务，`ios/` 为已生成的原生 iOS 工程，`cloud/schema.sql` 为可选云数据库配置，`public/` 为网页资源。
 
 ## iPhone 运行与安装
