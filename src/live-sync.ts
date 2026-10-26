@@ -7,6 +7,7 @@ import { validateClassMark } from './classes';
 import { validateWeight } from './weight';
 import { validateTimetable } from './timetable';
 import { mergeJournal, newerEntry, validateJournalEntry } from './journal';
+import { sameContent } from './stable-json';
 
 // 清单、课表同步与实时推送，电脑版和 iPhone 网页版共用。
 // 云端需先运行 cloud/schema-v2.sql、schema-v3.sql；没运行时对应部分自动跳过，日程同步不受影响。
@@ -140,10 +141,7 @@ export async function syncWeekly(client: SupabaseClient, userId: string, goals: 
     }
     if (!data || data.length < 500) break;
   }
-  const newer = <T extends { id: string; updatedAt: string; deletedAt?: string }>(local: T[], remote: T[]) => {
-    const byId = new Map(remote.map(item => [item.id, item]));
-    return local.filter(item => { const other = byId.get(item.id); return !other || newerItem(item, other) === item && JSON.stringify(item) !== JSON.stringify(other); });
-  };
+  const newer = <T extends { id: string; updatedAt: string; deletedAt?: string }>(local: T[], remote: T[]) => itemsToPush(local, remote, newerItem);
   const push = [...newer(goals, remoteGoals).map(item => ({ kind: 'goal', item })), ...newer(marks, remoteMarks).map(item => ({ kind: 'mark', item })), ...newer(classMarks, remoteClasses).map(item => ({ kind: 'class', item })), ...newer(weights, remoteWeights).map(item => ({ kind: 'weight', item }))];
   for (let start = 0; start < push.length; start += 200) {
     const { error } = await client.rpc('merge_weekly', { incoming: push.slice(start, start + 200), expected_user: userId });
@@ -152,15 +150,35 @@ export async function syncWeekly(client: SupabaseClient, userId: string, goals: 
   return { goals: mergeItems(goals, remoteGoals), marks: mergeItems(marks, remoteMarks), classMarks: mergeItems(classMarks, remoteClasses), weights: mergeItems(weights, remoteWeights) };
 }
 
-export function reflectionsToPush(local: Reflection[], remote: Reflection[]): Reflection[] {
+type Versioned = { id: string; updatedAt: string; deletedAt?: string };
+const revisionOf = (item: Versioned) => item.deletedAt && item.deletedAt > item.updatedAt ? item.deletedAt : item.updatedAt;
+
+/**
+ * 要上传的条目：云端没有的，或本机按规则胜出且内容确实不同的（按内容比，不看字段顺序，
+ * 否则云端返回的字段顺序不同会让同样的数据每次都重传）。
+ * 时间戳一样、内容不同时（例如两台设备各自自动排了同一节周次任务），云端只认更新的时间戳，
+ * 会一直留着自己那份，两台设备就永远各显示一套。所以本机胜出时把 updatedAt 往后推 1 毫秒再传，
+ * 云端收下后所有设备都会换成这一份。
+ */
+export function itemsToPush<T extends Versioned>(local: T[], remote: T[], newer: (a: T, b: T) => T): T[] {
   const byId = new Map(remote.map(item => [item.id, item]));
-  return local.filter(item => { const other = byId.get(item.id); return !other || newerReflection(item, other) === item && JSON.stringify(item) !== JSON.stringify(other); });
+  return local.flatMap(item => {
+    const other = byId.get(item.id);
+    if (!other) return [item];
+    if (sameContent(item, other) || newer(item, other) !== item) return [];
+    if (revisionOf(item) !== revisionOf(other)) return [item];
+    return [{ ...item, updatedAt: new Date(Date.parse(revisionOf(item)) + 1).toISOString() }];
+  });
+}
+
+export function reflectionsToPush(local: Reflection[], remote: Reflection[]): Reflection[] {
+  return itemsToPush(local, remote, newerReflection);
 }
 
 /** 本机比云端新的日记（云端没有的也算）。 */
 export function journalToPush(local: JournalEntry[], remote: JournalEntry[]): JournalEntry[] {
   const remoteByDate = new Map(remote.map(entry => [entry.date, entry]));
-  return local.filter(entry => { const other = remoteByDate.get(entry.date); return !other || newerEntry(entry, other) === entry && JSON.stringify(entry) !== JSON.stringify(other); });
+  return local.filter(entry => { const other = remoteByDate.get(entry.date); return !other || newerEntry(entry, other) === entry && !sameContent(entry, other); });
 }
 
 /** 另一台设备改了日程或清单时立即通知；手机从后台回来时由调用方再补一次同步。 */

@@ -111,7 +111,11 @@ Deno.serve(async request => {
     for (const item of due) {
       // 先占位再发送：并发或重跑时同一提醒只发一次。
       const { error: claimError } = await admin.from('shiri_push_sent').insert({ endpoint: sub.endpoint, occurrence: item.occurrence });
-      if (claimError) { failures.push({ occurrence: item.occurrence, reason: `claim: ${claimError.message}` }); continue; }
+      if (claimError) {
+        // 23505 = 已经发过（每分钟都会再算一次到点的提醒），不算失败。
+        if (claimError.code !== '23505') failures.push({ occurrence: item.occurrence, reason: `claim: ${claimError.message}` });
+        continue;
+      }
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },

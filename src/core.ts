@@ -63,10 +63,11 @@ export function monthDays(year: number, month: number): string[] {
 
 export function occursOn(task: Task, key: string): boolean {
   if (task.deletedAt || !task.date || !key || key < task.date) return false;
+  // 不重复的日程只需比较日期字符串；日历每格都要对所有日程判断一次，省掉解析日期能少很多卡顿。
+  if (task.repeat === 'none') return key === task.date;
   const date = parseDate(key);
   const start = parseDate(task.date);
   switch (task.repeat) {
-    case 'none': return key === task.date;
     case 'daily': return true;
     case 'weekdays': return date.getDay() !== 0 && date.getDay() !== 6;
     case 'weekly': return date.getDay() === start.getDay();

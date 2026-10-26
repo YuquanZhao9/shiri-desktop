@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, DragEvent, ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { CalendarDays, Check, ChevronLeft, ChevronRight, ChevronDown, Plus, Search, Settings, ListTodo, Inbox, Sun, X, Clock3, Repeat2, Trash2, ArrowUpRight, PanelRightClose, PanelRightOpen, Maximize2, Cloud, Download, Upload, Monitor, Smartphone, Bell, MoreHorizontal, CheckCheck, Circle, LogOut, RefreshCw, Menu, GraduationCap, Star, BookOpen, Lightbulb, Target, BookMarked, Scale } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, Timetable, TimetableSlot } from './types';
@@ -45,6 +46,10 @@ const reminderLeads=(value:string)=>value==='multi'?MULTI_REMINDER_LEADS:[Number
 const germanStatePref=()=>{const value=getPref('shiri-de-state','BW');return (GERMAN_STATES.some(([code])=>code===value)?value:'') as GermanState;};
 // 桌面日历点日记标记时写入，管理窗口读到后打开那天的日记。
 const OPEN_JOURNAL_KEY='shiri-open-journal';
+// 桌面版多窗口：只有一个窗口负责同步，其他窗口用这两个键请求同步、读同步状态。
+const SYNC_REQUEST_KEY='shiri-sync-request';
+const SYNC_STATE_KEY='shiri-sync-state';
+const requestLeaderSync=()=>{try{localStorage.setItem(SYNC_REQUEST_KEY,String(Date.now()));}catch{/* ignore */}};
 // 日期格时间轴上的位置（0–1）换回一天中的分钟，和 timetable.ts dayFraction 相反。
 const fractionMinutes=(fraction:number)=>{const slot=fraction*16;return slot<1?slot*360:slot<15?360+(slot-1)*60:1200+(slot-15)*240;};
 const minutesTime=(mins:number)=>`${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
@@ -169,6 +174,8 @@ function App() {
       if(event.key==='shiri-weight-reminder')setWeightReminder(event.newValue!=='0');
       if(event.key==='shiri-done-bottom')setDoneBottom(event.newValue!=='0');
       if(event.key===OPEN_JOURNAL_KEY&&event.newValue&&!window.location.hash)openJournalRequest(event.newValue);
+      if(event.key===SYNC_REQUEST_KEY&&syncLeaderRef.current)setSyncRetry(n=>n+1);
+      if(event.key===SYNC_STATE_KEY&&event.newValue)setSharedSyncState(event.newValue);
       if(event.key==='shiri-cloud-key'){
         const url=getPref('shiri-cloud-url',''),key=getPref('shiri-cloud-key','');
         setCloudUrl(url);setCloudKey(key);
@@ -296,11 +303,34 @@ function App() {
     const savedUrl=getPref('shiri-cloud-url',''),savedKey=getPref('shiri-cloud-key','');
     if(savedUrl&&savedKey)try{setClient(createCloudClient(savedUrl,savedKey));setCloudConfigured(true);}catch{toast('云同步配置无效，请在设置中更新');}
   },[toast]);
+  // 桌面版同时开着好几个窗口（桌面日历、管理窗口、一直待命的格内编辑器、日记 / 复盘 / 课程 / 体重小窗），
+  // 以前每个窗口都各自同步、各自订阅云端变化、各自每 45 秒拉一遍全部数据，改一条日程会触发好几轮同步，桌面因此发卡。
+  // 现在只让一个窗口负责同步（用浏览器的 Web Locks 选出来；它关掉后另一个窗口自动接手），其他窗口经本机存储拿到结果。
+  // 小窗口和格内编辑器从不负责同步。iPhone 网页版和浏览器预览只有一个窗口，照旧自己同步。
+  const syncSurface=!editorSurface&&!journalSurface&&!reviewQuickSurface&&!classSurface&&!weightSurface;
+  const [syncLeader,setSyncLeader]=useState(()=>!window.desktop);
+  const syncLeaderRef=useRef(syncLeader); syncLeaderRef.current=syncLeader;
+  const [sharedSyncState,setSharedSyncState]=useState(()=>getPref(SYNC_STATE_KEY,''));
+  // 不负责同步的窗口显示负责同步的那个窗口的状态。
+  const syncLabel=window.desktop&&!syncLeader&&sharedSyncState?sharedSyncState:syncState;
+  useEffect(()=>{
+    if(!window.desktop||!syncSurface)return;
+    const locks=(navigator as Navigator&{locks?:LockManager}).locks;
+    if(!locks?.request){setSyncLeader(true);return;}
+    const controller=new AbortController();let release=()=>{};
+    locks.request('shiri-sync-leader',{signal:controller.signal},()=>new Promise<void>(resolve=>{release=resolve;setSyncLeader(true);})).catch(()=>{/* 窗口关闭时放弃排队 */});
+    return()=>{controller.abort();release();setSyncLeader(false);};
+  },[syncSurface]);
+  // 负责同步的窗口把同步状态写进本机存储，管理窗口的“已同步 / 同步失败”跟着显示。
+  useEffect(()=>{if(window.desktop&&syncLeader)try{localStorage.setItem(SYNC_STATE_KEY,syncState);}catch{/* ignore */}},[syncLeader,syncState]);
   const syncing=useRef(false);
+  const syncAgain=useRef(false);
   // 自动排周次任务要等第一次同步完，免得和另一台设备上改过的格子打架。
   const syncedOnce=useRef(false);
   const runSync=useCallback(async()=>{
-    if(!client||!user||!readyRef.current||syncing.current)return;
+    if(!client||!user||!readyRef.current||!syncLeaderRef.current)return;
+    // 同步进行中又改了东西：记下来，这一轮结束马上再同步一次（以前要等 45 秒的定时同步）。
+    if(syncing.current){syncAgain.current=true;return;}
     const owner=user.id, expectedKey=accountKey(owner);
     if(keyRef.current!==expectedKey||loadedKeyRef.current!==expectedKey)return;
     syncing.current=true;setSyncState('正在同步');
@@ -318,12 +348,13 @@ function App() {
         if(syncedWeekly&&uidRef.current===owner&&keyRef.current===expectedKey)setData(prev=>{const goals=mergeItems(prev.goals,syncedWeekly.goals),goalMarks=mergeItems(prev.goalMarks,syncedWeekly.marks),classMarks=mergeItems(prev.classMarks,syncedWeekly.classMarks),weights=mergeItems(prev.weights,syncedWeekly.weights);return JSON.stringify(goals)===JSON.stringify(mergeItems(prev.goals))&&JSON.stringify(goalMarks)===JSON.stringify(mergeItems(prev.goalMarks))&&JSON.stringify(classMarks)===JSON.stringify(mergeItems(prev.classMarks))&&JSON.stringify(weights)===JSON.stringify(mergeItems(prev.weights))?prev:{...prev,goals,goalMarks,classMarks,weights};});
         syncedOnce.current=true;setSyncState('已同步');}
     }catch(e){if(uidRef.current===owner)setSyncState(navigator.onLine?'同步失败，已保存在本机':'离线 · 已保存在本机');}
-    finally{syncing.current=false;}
+    finally{syncing.current=false;if(syncAgain.current){syncAgain.current=false;setSyncRetry(n=>n+1);}}
   },[client,user,accountKey]);
-  useEffect(()=>{if(!user||!ready||loadedKey!==storageKey)return;const t=setTimeout(()=>void runSync(),1800);return()=>clearTimeout(t);},[data.tasks,data.lists,data.timetable,data.journal,data.reflections,data.goals,data.goalMarks,data.classMarks,data.weights,ready,loadedKey,storageKey,runSync,syncRetry,user]);
+  useEffect(()=>{if(!user||!ready||loadedKey!==storageKey||!syncLeader)return;const t=setTimeout(()=>void runSync(),1800);return()=>clearTimeout(t);},[data.tasks,data.lists,data.timetable,data.journal,data.reflections,data.goals,data.goalMarks,data.classMarks,data.weights,ready,loadedKey,storageKey,runSync,syncRetry,user,syncLeader]);
   // 手机上的改动几秒内推到电脑：云端有变更就立刻同步一次。
-  useEffect(()=>{if(!client||!user)return;let t:ReturnType<typeof setTimeout>|undefined;const stop=subscribeLive(client,user.id,()=>{clearTimeout(t);t=setTimeout(()=>setSyncRetry(n=>n+1),350);});return()=>{clearTimeout(t);stop();};},[client,user]);
-  useEffect(()=>{if(!user)return;const sync=()=>setSyncRetry(n=>n+1);const t=setInterval(sync,45000);window.addEventListener('online',sync);window.addEventListener('focus',sync);return()=>{clearInterval(t);window.removeEventListener('online',sync);window.removeEventListener('focus',sync);};},[user]);
+  useEffect(()=>{if(!client||!user||!syncLeader)return;let t:ReturnType<typeof setTimeout>|undefined;const stop=subscribeLive(client,user.id,()=>{clearTimeout(t);t=setTimeout(()=>setSyncRetry(n=>n+1),350);});return()=>{clearTimeout(t);stop();};},[client,user,syncLeader]);
+  // 不负责同步的窗口（例如管理窗口）获得焦点或点“立即同步”时，请负责同步的窗口同步一次。
+  useEffect(()=>{if(!user||!syncSurface)return;const sync=()=>{if(syncLeaderRef.current)setSyncRetry(n=>n+1);else requestLeaderSync();};const t=setInterval(()=>{if(syncLeaderRef.current)setSyncRetry(n=>n+1);},45000);window.addEventListener('online',sync);window.addEventListener('focus',sync);return()=>{clearInterval(t);window.removeEventListener('online',sync);window.removeEventListener('focus',sync);};},[user,syncSurface]);
   useEffect(()=>{if(view==='day'&&timelineRef.current)timelineRef.current.scrollTop=7*60;},[view,selected]);
   useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){setEdit(null);setSettings(false);setMobileMenu(false);}if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();document.getElementById('search')?.focus();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[]);
 
@@ -387,7 +418,7 @@ function App() {
     ...tasksForDate(active,date).filter(t=>t.time).map(t=>[timeMinutes(t.time),timeMinutes(t.time)+t.duration] as [number,number]),
   ];};
   useEffect(()=>{
-    if(!ready||loadedKey!==storageKey||editorSurface||journalSurface||reviewQuickSurface||classSurface)return;
+    if(!ready||loadedKey!==storageKey||editorSurface||journalSurface||reviewQuickSurface||classSurface||weightSurface)return;
     if(user&&!syncedOnce.current)return;
     if(!activeGoals(data.goals).length)return;
     const added=autoPlanWeek(data.goals,data.goalMarks,today,Date.now(),busyOf(data));
@@ -614,8 +645,8 @@ function App() {
       <div className="nav-heading">我的清单 <span>{data.lists.length}</span></div>
       <nav className="list-nav">{data.lists.map(list=><button key={list.id} className={filter===list.id?'active':''} onClick={()=>{setFilter(list.id);setSection('calendar');setMobileMenu(false);}}><i style={{background:list.color}}/>{list.name}<span>{activeTasks.filter(t=>t.listId===list.id&&!isDone(t,t.date||today)).length}</span></button>)}</nav>
       <div className="sidebar-bottom"><div className="daily-progress"><div><span>今天的每一小步</span><strong>{completedToday}<em> / {todayTasks.length}</em></strong></div><div className="progress-track"><i style={{width:`${todayTasks.length?completedToday/todayTasks.length*100:0}%`}}/></div><small>{todayTasks.length?'按自己的节奏，慢慢完成。':'留一点时间，给重要的事。'}</small></div>
-      <button className="settings-link" onClick={()=>setSettings(true)}><Settings size={17}/>设置与同步<span className={`status-dot ${user&&syncState==='已同步'?'online':''}`}/></button>
-      <div className="profile"><div className="avatar">{user?'我':'昱'}</div><div><strong>{user?.email?.split('@')[0]||'我的空间'}</strong><small>{user?syncState:'离线可用 · 本机保存'}</small></div><button className="icon-button" title="账号与同步" onClick={()=>setSettings(true)}><MoreHorizontal size={18}/></button></div></div>
+      <button className="settings-link" onClick={()=>setSettings(true)}><Settings size={17}/>设置与同步<span className={`status-dot ${user&&syncLabel==='已同步'?'online':''}`}/></button>
+      <div className="profile"><div className="avatar">{user?'我':'昱'}</div><div><strong>{user?.email?.split('@')[0]||'我的空间'}</strong><small>{user?syncLabel:'离线可用 · 本机保存'}</small></div><button className="icon-button" title="账号与同步" onClick={()=>setSettings(true)}><MoreHorizontal size={18}/></button></div></div>
     </aside>}
     {!desktopSurface&&mobileMenu&&<button className="menu-scrim" aria-label="关闭导航" onClick={()=>setMobileMenu(false)}/>}
     {!cellEditorSurface&&<main className="main">
@@ -668,7 +699,7 @@ function App() {
       <div className="settings-section"><h3><Scale size={17}/>体重</h3><WeightChart weights={data.weights} today={today} compact/><div className="backup-buttons"><button className="secondary" onClick={()=>{setSettings(false);setSection('weight');}}>打开体重记录</button></div></div>
       <div className="settings-section"><h3><Bell size={17}/>日程提醒</h3><label className="setting-row">开启日程提醒<input type="checkbox" checked={reminders} onChange={async e=>{const enabled=e.target.checked;if(!enabled||await enableNotifications()){setReminders(enabled);localStorage.setItem('shiri-reminders',String(enabled));}else toast('通知权限未开启，请在系统设置中允许通知');}}/></label><label className="setting-row">提醒时间<select aria-label="提醒时间" value={reminderLead} onChange={e=>{const value=e.target.value;setReminderLead(value);try{localStorage.setItem('shiri-reminder-leads',value);}catch{toast('提醒时间未能保存');}}}>{REMINDER_OPTIONS.map(value=><option key={value} value={value}>{value==='multi'?'提前 2 小时、1 小时、10 分钟':value==='0'?'开始时':`只提前 ${leadLabel(Number(value))}`}</option>)}</select></label><label className="setting-row">完成的日程放到当天最下面（不再显示时间）<input type="checkbox" checked={doneBottom} onChange={e=>{const enabled=e.target.checked;setDoneBottom(enabled);try{localStorage.setItem('shiri-done-bottom',enabled?'1':'0');}catch{toast('设置未能保存');}}}/></label><label className="setting-row">每天 {WEIGHT_TIME} 还没记体重时提醒<input type="checkbox" checked={weightReminder} onChange={e=>{const enabled=e.target.checked;setWeightReminder(enabled);try{localStorage.setItem('shiri-weight-reminder',enabled?'1':'0');}catch{toast('体重提醒设置未能保存');}}}/></label><label className="setting-row">周五 {GOAL_REMINDER_TIME} 周次任务还差 2 次及以上时提醒<input type="checkbox" checked={goalReminder} onChange={e=>{const enabled=e.target.checked;setGoalReminder(enabled);try{localStorage.setItem('shiri-goal-reminder',enabled?'1':'0');}catch{toast('周次任务提醒设置未能保存');}}}/></label><label className="setting-row">每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总<input type="checkbox" checked={reviewReminder} onChange={e=>{const enabled=e.target.checked;setReviewReminder(enabled);try{localStorage.setItem('shiri-review-reminder',enabled?'1':'0');}catch{toast('复盘提醒设置未能保存');}}}/></label><label className="setting-row">每天 {JOURNAL_REMINDER_TIME} 还没写日记时提醒<input type="checkbox" checked={journalReminder} onChange={e=>{const enabled=e.target.checked;setJournalReminder(enabled);try{localStorage.setItem('shiri-journal-reminder',enabled?'1':'0');}catch{toast('日记提醒设置未能保存');}}}/></label><p>Windows 到点在屏幕右下角弹出提醒，可以点“10 分钟后再提醒”；关闭窗口后在托盘继续提醒；退出软件或电脑关机后不提醒。iPhone 原生版预排未来 30 天内最近 60 条提醒，打开应用时更新。网页版需要保持页面运行。</p></div>
       <div className="settings-section"><h3><Cloud size={17}/>电脑与 iPhone 同步 <span className="small-pill">可选</span></h3><p>使用托管 Supabase 项目，不需要自己购买服务器。当前{user?`登录为 ${user.email}`:'尚未登录账号，数据仅在这台设备'}。</p><details open={!cloudConfigured}><summary>连接云项目</summary><label>项目 URL<input type="url" placeholder="https://你的项目.supabase.co" value={cloudUrl} onChange={e=>setCloudUrl(e.target.value)}/></label><label>Publishable / anon key<input type="text" autoComplete="off" placeholder="项目公开客户端密钥" value={cloudKey} onChange={e=>setCloudKey(e.target.value)}/></label><p className="minor">先在云项目执行随软件提供的 cloud/schema.sql。这里只填写公开客户端密钥，不能填写 service_role 密钥。</p><button className="secondary" disabled={!!user} onClick={()=>{try{const next=createCloudClient(cloudUrl.trim(),cloudKey.trim());localStorage.setItem('shiri-cloud-url',cloudUrl.trim());localStorage.setItem('shiri-cloud-key',cloudKey.trim());setClient(next);setCloudConfigured(true);toast('云连接配置已保存，请登录后验证同步');}catch(e){toast(cloudErrorMessage(e));}}}>保存连接配置</button>{user&&<p className="minor">更换云项目之前请先退出账号。</p>}</details>
-      {user?<><div className="account-row"><div className="avatar">我</div><div><strong>{user.email}</strong><small>{syncState}</small></div><button className="icon-button" title="立即同步" onClick={()=>void runSync()}><RefreshCw size={17}/></button><button className="icon-button" title="退出账号" onClick={async()=>{const result=await client?.auth.signOut({scope:'local'});if(result?.error)toast(cloudErrorMessage(result.error));else toast('已退出，切换回本机空间');}}><LogOut size={17}/></button></div><div className="account-actions"><button className="secondary" onClick={()=>void migrateLocal()}>将本机任务合并到此账号</button><button className="secondary" onClick={()=>setChangingPassword(value=>!value)}>{changingPassword?'取消修改':'修改密码'}</button></div>{changingPassword&&<form className="password-change" onSubmit={e=>{e.preventDefault();void saveNewPassword();}}><label>新密码<input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="至少 8 位字符"/></label><label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} placeholder="再次输入新密码"/></label><button className="primary" type="submit" disabled={busy||newPassword.length<8||confirmPassword.length<8}>保存新密码</button><p className="minor">修改密码不会改变账号，也不会删除电脑、手机或云端日程。</p></form>}</>:<div className="auth-form"><label>邮箱<input type="email" autoComplete="username" value={email} onChange={e=>{setEmail(e.target.value);setResetOffer('');}} placeholder="you@example.com"/></label><label>密码<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="至少 8 位字符"/></label><div><button className="primary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('login')}>登录并同步</button><button className="secondary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('signup')}>注册账号</button></div><button className="auth-link" type="button" disabled={!client||busy||!email} onClick={()=>void sendPasswordReset()}>忘记密码？发送重置邮件</button>{resetOffer&&<div className="reset-offer" role="alert"><p>该邮箱已被注册。是否发送重置密码邮件？</p><div><button className="primary" type="button" disabled={busy} onClick={()=>void sendPasswordReset(resetOffer)}>发送重置邮件</button><button className="secondary" type="button" onClick={()=>setResetOffer('')}>暂不</button></div></div>}</div>}</div>
+      {user?<><div className="account-row"><div className="avatar">我</div><div><strong>{user.email}</strong><small>{syncLabel}</small></div><button className="icon-button" title="立即同步" onClick={()=>{if(syncLeader)void runSync();else requestLeaderSync();}}><RefreshCw size={17}/></button><button className="icon-button" title="退出账号" onClick={async()=>{const result=await client?.auth.signOut({scope:'local'});if(result?.error)toast(cloudErrorMessage(result.error));else toast('已退出，切换回本机空间');}}><LogOut size={17}/></button></div><div className="account-actions"><button className="secondary" onClick={()=>void migrateLocal()}>将本机任务合并到此账号</button><button className="secondary" onClick={()=>setChangingPassword(value=>!value)}>{changingPassword?'取消修改':'修改密码'}</button></div>{changingPassword&&<form className="password-change" onSubmit={e=>{e.preventDefault();void saveNewPassword();}}><label>新密码<input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="至少 8 位字符"/></label><label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} placeholder="再次输入新密码"/></label><button className="primary" type="submit" disabled={busy||newPassword.length<8||confirmPassword.length<8}>保存新密码</button><p className="minor">修改密码不会改变账号，也不会删除电脑、手机或云端日程。</p></form>}</>:<div className="auth-form"><label>邮箱<input type="email" autoComplete="username" value={email} onChange={e=>{setEmail(e.target.value);setResetOffer('');}} placeholder="you@example.com"/></label><label>密码<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="至少 8 位字符"/></label><div><button className="primary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('login')}>登录并同步</button><button className="secondary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('signup')}>注册账号</button></div><button className="auth-link" type="button" disabled={!client||busy||!email} onClick={()=>void sendPasswordReset()}>忘记密码？发送重置邮件</button>{resetOffer&&<div className="reset-offer" role="alert"><p>该邮箱已被注册。是否发送重置密码邮件？</p><div><button className="primary" type="button" disabled={busy} onClick={()=>void sendPasswordReset(resetOffer)}>发送重置邮件</button><button className="secondary" type="button" onClick={()=>setResetOffer('')}>暂不</button></div></div>}</div>}</div>
       {user&&client&&<AiTokenSection client={client} userId={user.id} projectUrl={cloudUrl} toast={toast}/>}
       <div className="settings-section"><h3><Download size={17}/>数据备份</h3><p>导入采用合并方式。建议定期导出备份；不同账号拥有独立的本机空间。</p><div className="backup-buttons"><button className="secondary" onClick={downloadBackup}><Download size={15}/>导出 JSON 备份</button><button className="secondary" onClick={()=>importRef.current?.click()}><Upload size={15}/>导入并合并</button></div><input ref={importRef} type="file" accept=".json,application/json" hidden onChange={e=>void importBackup(e.target.files?.[0])}/></div>
       <div className="settings-section"><h3><Smartphone size={17}/>iPhone 使用</h3><p>在 iPhone 的 Safari 打开 https://yuquanzhao9.github.io/yushi-app/ ，点分享 →「添加到主屏幕」，用同一账号登录即可同步；在“我的”里开启提醒后，到点由云端推送。</p></div>
@@ -716,9 +747,36 @@ function ColorSwatches({value,fallback,onChange}:{value?:string;fallback?:string
 
 /** Shows every event that fits in the cell; "还有 N 项" only for the ones that really do not. */
 /** The timed part of a date cell; entries too short for a line of text show as plain color bars. */
+// 日期格里“放不放得下”的测量，所有格子合在一起分步做：先统一读、再统一改、再统一读……
+// 以前每个格子、每一条日程都是改一下样式马上读一次尺寸，浏览器每读一次都要重新排版整页，
+// 日程多时翻一页要排版上百次，这是桌面日历翻页、改日程时发卡的主要原因之一。
+// 步骤下标对齐：0 读格子高度，1 改样式，2 读，3 改，4 读，5 改。
+type MeasureStep=(()=>void)|null;
+const measureQueue=new Map<object,MeasureStep[]>();
+// “还有 N 项”的数字要在这一帧画出来之前更新，测完后一起同步渲染，不会先闪一下旧数字。
+const measureUpdates:(()=>void)[]=[];
+function queueMeasure(owner:object,steps:MeasureStep[]){
+  if(!measureQueue.size)queueMicrotask(flushMeasure);
+  measureQueue.set(owner,steps);
+}
+function flushMeasure(){
+  const jobs=[...measureQueue.values()];measureQueue.clear();
+  const depth=Math.max(0,...jobs.map(job=>job.length));
+  for(let step=0;step<depth;step++)for(const job of jobs)job[step]?.();
+  const updates=measureUpdates.splice(0);
+  if(updates.length)flushSync(()=>{for(const update of updates)update();});
+}
+
 function CellHours({children}:{children:ReactNode}){
   const box=useRef<HTMLDivElement>(null);
-  const measure=useCallback(()=>{const element=box.current;if(!element)return;for(const item of Array.from(element.children) as HTMLElement[])if(item.classList.contains('calendar-event'))item.classList.toggle('bar',item.offsetHeight<12);},[]);
+  const measure=useCallback(()=>{
+    const element=box.current;if(!element)return;
+    let short:[HTMLElement,boolean][]=[];
+    // 在其他测量改完样式之后读（第 4 步），太矮放不下一行字的画成色条。
+    queueMeasure(element,[null,null,null,null,
+      ()=>{short=(Array.from(element.children) as HTMLElement[]).filter(item=>item.classList.contains('calendar-event')).map(item=>[item,item.offsetHeight<12]);},
+      ()=>{for(const [item,bar] of short)item.classList.toggle('bar',bar);}]);
+  },[]);
   useLayoutEffect(()=>{measure();});
   useEffect(()=>{const element=box.current;if(!element)return;const observer=new ResizeObserver(()=>measure());observer.observe(element);return()=>observer.disconnect();},[measure]);
   return <div className="cell-hours" ref={box}>{children}</div>;
@@ -736,25 +794,27 @@ function DoneBar({children}:{children:ReactNode}){
   const [hidden,setHidden]=useState<string[]>([]);
   const measure=useCallback(()=>{
     const element=box.current;if(!element)return;
-    // 固定 6–7 行高，格子太矮时最多占四成。
-    const parent=element.parentElement;element.style.height=parent&&parent.clientHeight?`${Math.min(118,Math.max(36,Math.floor(parent.clientHeight*0.4)))}px`:'';
+    let parentHeight=0,limit=0,bottoms:number[]=[];
     const items=Array.from(element.querySelectorAll<HTMLElement>(':scope>.calendar-event'));
     const more=element.querySelector<HTMLElement>(':scope>.done-more');
-    for(const item of items)item.style.display='';
-    if(more)more.style.display='none';
-    const limit=element.getBoundingClientRect().bottom;
-    let fit=items.length;
-    if(items.some(item=>item.getBoundingClientRect().bottom>limit+0.5)){
-      // 先全部收起只留 +N，再一条条放回，直到 +N 碰到底。
-      if(more)more.style.display='';
-      for(const item of items)item.style.display='none';
-      fit=0;
-      while(fit<items.length){items[fit].style.display='';if((more?more.getBoundingClientRect().bottom:items[fit].getBoundingClientRect().bottom)>limit+0.5){items[fit].style.display='none';break;}fit++;}
-    }
-    items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
-    if(more)more.style.display=fit<items.length?'':'none';
-    const names=items.slice(fit).map(item=>item.querySelector('span')?.textContent||'');
-    setHidden(previous=>JSON.stringify(previous)===JSON.stringify(names)?previous:names);
+    queueMeasure(element,[
+      ()=>{parentHeight=element.parentElement?.clientHeight??0;},
+      ()=>{
+        // 固定 6–7 行高，格子太矮时最多占四成。
+        element.style.height=parentHeight?`${Math.min(118,Math.max(36,Math.floor(parentHeight*0.4)))}px`:'';
+        for(const item of items)item.style.display='';
+        if(more)more.style.display='none';
+      },
+      ()=>{limit=element.getBoundingClientRect().bottom;bottoms=items.map(item=>item.getBoundingClientRect().bottom);},
+      ()=>{
+        // 放不下时留一行给 +N（行高 15、间距 2），前面能放几条放几条。
+        let fit=items.length;
+        if(bottoms.some(bottom=>bottom>limit+0.5)){fit=0;while(fit<items.length&&bottoms[fit]+17<=limit+0.5)fit++;}
+        items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
+        if(more)more.style.display=fit<items.length?'':'none';
+        const names=items.slice(fit).map(item=>item.querySelector('span')?.textContent||'');
+        measureUpdates.push(()=>setHidden(previous=>JSON.stringify(previous)===JSON.stringify(names)?previous:names));
+      }]);
   },[]);
   useLayoutEffect(()=>{measure();});
   useEffect(()=>{const element=box.current;if(!element)return;const observer=new ResizeObserver(()=>measure());observer.observe(element);return()=>observer.disconnect();},[measure]);
@@ -768,23 +828,27 @@ function CellTasks({children,onMore}:{children:ReactNode;onMore:()=>void}){
     const element=box.current;if(!element)return;
     const items=Array.from(element.querySelectorAll<HTMLElement>(':scope>.calendar-event'));
     const more=element.querySelector<HTMLElement>(':scope>.more-events');
-    for(const item of items)item.style.display='';
-    if(more)more.style.display='none';
-    // 没定时间的最多占格子的三分之一，给时间轴留地方。
-    const parent=element.parentElement;if(parent&&parent.clientHeight)element.style.maxHeight=`${Math.max(40,Math.floor(parent.clientHeight*0.34))}px`;
-    // 放不下时先换成紧凑的一行行显示，还放不下才收起后面的。
-    element.classList.remove('compact');
-    if(items.length&&element.scrollHeight>element.clientHeight+0.5)element.classList.add('compact');
-    const top=element.getBoundingClientRect().top,limit=element.clientHeight;
-    const bottom=(item:HTMLElement)=>item.getBoundingClientRect().bottom-top;
-    let fit=items.length;
-    if(items.length&&bottom(items[items.length-1])>limit+0.5){
-      const reserve=(more?.offsetHeight||14)+3;
-      fit=0;while(fit<items.length&&bottom(items[fit])<=limit-reserve)fit++;
-    }
-    items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
-    if(more)more.style.display=fit<items.length?'':'none';
-    setHidden(items.length-fit);
+    let parentHeight=0,compact=false,limit=0,bottoms:number[]=[];
+    queueMeasure(element,[
+      ()=>{parentHeight=element.parentElement?.clientHeight??0;},
+      ()=>{
+        for(const item of items)item.style.display='';
+        if(more)more.style.display='none';
+        // 没定时间的最多占格子的三分之一，给时间轴留地方。
+        if(parentHeight)element.style.maxHeight=`${Math.max(40,Math.floor(parentHeight*0.34))}px`;
+        element.classList.remove('compact');
+      },
+      // 放不下时先换成紧凑的一行行显示，还放不下才收起后面的。
+      ()=>{compact=items.length>0&&element.scrollHeight>element.clientHeight+0.5;},
+      ()=>{if(compact)element.classList.add('compact');},
+      ()=>{const top=element.getBoundingClientRect().top;limit=element.clientHeight;bottoms=items.map(item=>item.getBoundingClientRect().bottom-top);},
+      ()=>{
+        let fit=items.length;
+        if(items.length&&bottoms[items.length-1]>limit+0.5){const reserve=14+3;fit=0;while(fit<items.length&&bottoms[fit]<=limit-reserve)fit++;}
+        items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
+        if(more)more.style.display=fit<items.length?'':'none';
+        measureUpdates.push(()=>setHidden(items.length-fit));
+      }]);
   },[]);
   useLayoutEffect(()=>{measure();});
   useEffect(()=>{const element=box.current;if(!element)return;const observer=new ResizeObserver(()=>measure());observer.observe(element);return()=>observer.disconnect();},[measure]);
