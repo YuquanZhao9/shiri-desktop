@@ -77,8 +77,8 @@ function shiftKey(key: string, days: number): string {
  * 找出此刻该推送的提醒：提醒时刻（日程时间减提前量）落在 (now - lookback, now + ahead]。
  * 定时任务每分钟跑一次；lookback 覆盖偶尔延迟或漏跑的那一两分钟，重复由已发送表挡住。
  */
-/** 默认每个日程提前 2 小时、1 小时、30 分钟、10 分钟各推送一次（与桌面版一致）。 */
-export const MULTI_LEADS = [120, 60, 30, 10];
+/** 默认每个日程提前 2 小时、1 小时、10 分钟各推送一次（与桌面版一致）。 */
+export const MULTI_LEADS = [120, 60, 10];
 
 const leadText = (minutes: number) => minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
 
@@ -94,7 +94,7 @@ export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinute
       const at = zonedTime(day, task.time, timeZone);
       // 日程开始后就不再补发。
       if (at < now - 60_000) continue;
-      // 只发最近到点的一条：漏跑几分钟后不会把 30 分钟和 10 分钟的提醒同时推出来。
+      // 只发最近到点的一条：漏跑几分钟后不会把 1 小时和 10 分钟的提醒同时推出来。
       const fired = leads.filter(lead => { const fire = at - lead * 60_000; return fire > now - lookbackMs && fire <= now + aheadMs; });
       if (!fired.length) continue;
       const lead = Math.min(...fired);
@@ -103,4 +103,65 @@ export function dueReminders(tasks: ReminderTask[], timeZone: string, leadMinute
     }
   }
   return result.sort((a, b) => a.at - b.at);
+}
+
+/** 每天这个时间还没写日记就推送（与桌面版 src/journal.ts 的 JOURNAL_REMINDER_TIME 相同）。 */
+export const JOURNAL_TIME = '21:00';
+
+/** 用户所在时区今天 21:00 到点、且今天还没写日记时返回一条推送。 */
+export function journalDue(timeZone: string, now: number, written: (day: string) => boolean, lookbackMs = 10 * 60_000, aheadMs = 30_000): Due | null {
+  const today = zonedDateKey(now, timeZone);
+  const at = zonedTime(today, JOURNAL_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs || written(today)) return null;
+  return { occurrence: `journal:${today}:${JOURNAL_TIME}`, title: '该写今天的日记了', body: '今天的日记还没写，花几分钟记下今天吧', at };
+}
+
+/** 每周日这个时间提醒看本周复盘汇总（与桌面版 src/reflections.ts 的 REVIEW_REMINDER_TIME 相同）。 */
+export const REVIEW_TIME = '20:00';
+
+/** 用户所在时区的周日 20:00 到点时返回本周（周一到周日）的范围和推送；不是这个时刻返回 null。 */
+export function reviewDue(timeZone: string, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): { start: string; end: string; due: Due } | null {
+  const today = zonedDateKey(now, timeZone);
+  const [y, m, d] = today.split('-').map(Number);
+  if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() !== 0) return null;
+  const at = zonedTime(today, REVIEW_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs) return null;
+  return { start: shiftKey(today, -6), end: today, due: { occurrence: `review:${today}:${REVIEW_TIME}`, title: '本周复盘汇总好了', body: '这周的感悟都整理在一起了，点开看看', at } };
+}
+
+/** 周五这个时间，周次任务还差 2 次及以上时提醒（与桌面版 src/weekly.ts 的 GOAL_REMINDER_TIME 相同）。 */
+export const GOAL_TIME = '19:00';
+
+export interface GoalRow { id: string; name: string; target: number; deletedAt?: string }
+export interface MarkRow { goalId: string; date: string; done: boolean; deletedAt?: string }
+
+/** 用户所在时区的周五 19:00：返回本周（周一起）范围和推送用的进度；不是这个时刻返回 null。 */
+export function goalWindow(timeZone: string, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): { start: string; end: string; at: number } | null {
+  const today = zonedDateKey(now, timeZone);
+  const [y, m, d] = today.split('-').map(Number);
+  if (new Date(Date.UTC(y, m - 1, d)).getUTCDay() !== 5) return null;
+  const at = zonedTime(today, GOAL_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs) return null;
+  return { start: shiftKey(today, -4), end: shiftKey(today, 2), at };
+}
+
+/** 还差 2 次及以上的任务拼成一条推送；都快完成了返回 null。 */
+export function goalDue(goals: GoalRow[], marks: MarkRow[], window: { start: string; end: string; at: number }): Due | null {
+  const behind = goals.filter(goal => !goal.deletedAt).map(goal => {
+    const done = marks.filter(mark => !mark.deletedAt && mark.done && mark.goalId === goal.id && mark.date >= window.start && mark.date <= window.end).length;
+    return { name: goal.name, remaining: Math.max(0, goal.target - done) };
+  }).filter(item => item.remaining >= 2);
+  if (!behind.length) return null;
+  return { occurrence: `goals:${window.start}:${GOAL_TIME}`, title: '这周的周次任务还差几次', body: `${behind.map(item => `${item.name}还差 ${item.remaining} 次`).join('，')}，周末安排一下吧`, at: window.at };
+}
+
+/** 每天这个时间还没记体重就推送（与桌面版 src/weight.ts 的 WEIGHT_TIME 相同）。 */
+export const WEIGHT_TIME = '08:00';
+
+/** 用户所在时区今天 08:00 到点时返回一条推送（是否已记由调用方再查）；不是这个时刻返回 null。 */
+export function weightDue(timeZone: string, now: number, lookbackMs = 10 * 60_000, aheadMs = 30_000): { day: string; due: Due } | null {
+  const today = zonedDateKey(now, timeZone);
+  const at = zonedTime(today, WEIGHT_TIME, timeZone);
+  if (at <= now - lookbackMs || at > now + aheadMs) return null;
+  return { day: today, due: { occurrence: `weight:${today}:${WEIGHT_TIME}`, title: '测体重', body: '早上测一下体重，在昱时里填上数字', at } };
 }

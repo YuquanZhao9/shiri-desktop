@@ -1,5 +1,5 @@
 // 自动从 拾日/src/timetable.ts 复制，请勿手改；运行 node scripts/sync-shared.mjs 更新。
-import type { Task, Timetable, TimetableAlert, TimetableBreak, TimetableCourse, TimetableSlot } from './types.ts';
+import type { GoalMark, WeeklyGoal, Task, Timetable, TimetableAlert, TimetableBreak, TimetableCourse, TimetableSlot } from './types.ts';
 
 const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -117,6 +117,21 @@ export function newerTimetable(a: Timetable | undefined, b: Timetable | undefine
   return JSON.stringify(a) >= JSON.stringify(b) ? a : b;
 }
 
+/** A class that happens on one date only (first date = last date), e.g. a workshop of a block course. */
+export function isOneOff(slot: TimetableSlot): boolean {
+  return !!slot.from && slot.from === slot.until;
+}
+
+/** One-off classes from a date on, in date order (shown as a dated list instead of in the weekly grid). */
+export function oneOffSlots(timetable: Timetable, from = ''): TimetableSlot[] {
+  return timetable.slots.filter(slot => isOneOff(slot) && slot.from! >= from).sort((a, b) => a.from!.localeCompare(b.from!) || a.start.localeCompare(b.start));
+}
+
+/** Weekly classes of a weekday for the week grid; one-off classes are left out (they still show on their date in the calendar). */
+export function weekGridSlots(timetable: Timetable, day: number): TimetableSlot[] {
+  return slotsForWeekday(timetable, day).filter(slot => !isOneOff(slot));
+}
+
 export function slotsForWeekday(timetable: Timetable, day: number): TimetableSlot[] {
   return timetable.slots.filter(slot => slot.day === day).sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
 }
@@ -164,11 +179,13 @@ export function effectiveTimetable(saved: Timetable | undefined): Timetable {
 /** All classes share one color so they read as one kind of entry among the day's events. */
 export const CLASS_COLOR = '#2A9D8F';
 
-export type AgendaItem = { kind: 'task'; time: string; task: Task } | { kind: 'class'; time: string; slot: DayClass };
+export type AgendaItem = { kind: 'task'; time: string; task: Task } | { kind: 'class'; time: string; slot: DayClass } | { kind: 'goal'; time: string; goal: WeeklyGoal; mark: GoalMark } | { kind: 'weight'; time: string; date: string; kg?: number };
 
 /** A day's events and classes in one list by start time; untimed events go last. */
-export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null): AgendaItem[] {
+export function dayAgenda(tasks: Task[], classes: PeriodRow[] | null, goals: { goal: WeeklyGoal; mark: GoalMark }[] = [], weight?: { time: string; date: string; kg?: number }): AgendaItem[] {
   const items: AgendaItem[] = [
+    ...(weight ? [{ kind: 'weight' as const, ...weight }] : []),
+    ...goals.filter(item => item.mark.time).map(item => ({ kind: 'goal' as const, time: item.mark.time!, goal: item.goal, mark: item.mark })),
     ...(classes ?? []).flatMap(row => row.slots.map(slot => ({ kind: 'class' as const, time: slot.start, slot }))),
     ...tasks.map(task => ({ kind: 'task' as const, time: task.time, task })),
   ];
@@ -199,7 +216,7 @@ export function cellLayout(items: AgendaItem[], minHeight = 0.06): { timed: Plac
   const untimed = items.filter(item => !item.time);
   const spans = items.filter(item => item.time).map(item => {
     const start = clock(item.time);
-    let end = item.kind === 'task' ? start + item.task.duration : clock(item.slot.end);
+    let end = item.kind === 'task' ? start + item.task.duration : item.kind === 'goal' ? start + (item.mark.duration ?? item.goal.duration ?? 60) : item.kind === 'weight' ? start + 30 : clock(item.slot.end);
     if (end <= start) end = start + 60;
     const top = dayFraction(start);
     const height = Math.max(dayFraction(end) - top, minHeight);
@@ -222,4 +239,14 @@ export function cellLayout(items: AgendaItem[], minHeight = 0.06): { timed: Plac
   }
   close();
   return { timed, untimed };
+}
+
+/**
+ * 完成的日程放到当天最下面、不再按时间排（只改显示，日程本身的时间不变）：
+ * 把它们的显示时间清空并排到最后；取消完成后自然回到原来的位置。
+ */
+export function doneToBottom(items: AgendaItem[], isDone: (task: Task) => boolean): AgendaItem[] {
+  const open: AgendaItem[] = [], done: AgendaItem[] = [];
+  for (const item of items) (item.kind === 'task' && isDone(item.task) ? done : open).push(item.kind === 'task' && isDone(item.task) ? { ...item, time: '' } : item);
+  return [...open, ...done];
 }

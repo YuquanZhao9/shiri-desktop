@@ -18,6 +18,8 @@ let application;
 
 (async () => {
   fs.mkdirSync(work, { recursive: true });
+  // Start from an empty test profile so earlier runs cannot leave events or diaries behind.
+  fs.rmSync(path.join(work, 'desktop-smoke-profile'), { recursive: true, force: true });
   application = await _electron.launch({ executablePath, args: [project, '--disable-gpu'], env: environment, timeout: 30_000 });
   const page = await application.firstWindow();
   page.on('pageerror', (error) => errors.push(error.message));
@@ -54,7 +56,7 @@ let application;
   assert.equal(renderer.invalidQueue.ok, false);
   assert.equal(renderer.require, 'undefined');
   assert.equal(renderer.nodeProcess, 'undefined');
-  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onModeChanged', 'onPointerReset', 'openEditor', 'openInlineEditor', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
+  assert.deepEqual(renderer.api, ['cellEditorReady', 'closeEditor', 'getSettings', 'notify', 'onCellEditorBlur', 'onCellEditorOpen', 'onJournalOpen', 'onModeChanged', 'onPointerReset', 'onReviewQuickOpen', 'openClassEditor', 'openEditor', 'openInlineEditor', 'openJournalWindow', 'openReviewQuick', 'openWeightEditor', 'passDesktopContextMenu', 'resizeCellEditor', 'setAutostart', 'setCalendarInteractive', 'setMode', 'setOpacity', 'setWidgetSide', 'setWidgetSpan', 'showWindow', 'syncReminders']);
   await page.getByRole('button', { name: '时间表', exact: true }).click();
   await page.waitForSelector('.timeline', { state: 'attached' });
   await page.getByRole('button', { name: '月历', exact: true }).click();
@@ -87,16 +89,16 @@ let application;
   await page.getByRole('button', { name: '两周' }).click();
   await page.waitForFunction(() => document.querySelectorAll('.day-cell').length === 14);
   assert.equal(await page.locator('.day-cell').count(), 14);
-  const targetDate = await page.locator('.day-cell').nth(1).getAttribute('data-date');
+  const targetDate = await page.locator('.day-cell').nth(5).getAttribute('data-date');
   // The isolated profile keeps earlier runs, so titles are unique per run.
   const run = Date.now().toString(36);
   const firstTitle = `桌面格内双击编辑测试 ${run}`;
   const reopenTitle = `关闭后再次双击 ${run}`;
-  const cellRect = await page.locator('.day-cell').nth(1).boundingBox();
+  const cellRect = await page.locator('.day-cell').nth(5).boundingBox();
   const windowCount = () => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
   const inlineWait = application.waitForEvent('window');
   let started = Date.now();
-  await page.locator('.day-cell').nth(1).dblclick({ position: { x: 90, y: 130 } });
+  await page.locator('.day-cell').nth(5).dblclick({ position: { x: 90, y: 130 } });
   const inlinePage = await inlineWait;
   inlinePage.on('pageerror', (error) => errors.push(`cell editor: ${error.message}`));
   inlinePage.on('console', (message) => { if (message.type() === 'error') errors.push(`cell editor: ${message.text()}`); });
@@ -167,14 +169,90 @@ let application;
   assert.equal(bounds.grid.bottom, bounds.viewport.height);
   assert.equal(bounds.grid.stripTop, null, 'classes live inside the date cells, not in a bottom strip');
   // Semester weeks show each weekday's classes by period inside the date cell.
-  await page.getByRole('button', { name: '下一段' }).click();
-  await page.waitForSelector('[data-date="2026-10-12"] .cell-classes', { state: 'attached' });
-  const mondayClasses = await page.evaluate(() => [...document.querySelectorAll('[data-date="2026-10-12"] .class-period')].map(row => ({ empty: row.classList.contains('empty'), chips: [...row.querySelectorAll('.class-chip')].map(chip => chip.textContent) })));
-  assert.equal(mondayClasses.length, 5);
-  assert.deepEqual(mondayClasses[0].chips, ['AR 讲课', 'MC 讲课']);
-  assert.equal(mondayClasses[1].empty, true);
-  assert.equal(await page.locator('[data-date="2026-10-16"] .cell-classes').count(), 0, 'no classes on Friday');
-  assert.equal(await page.locator('[data-date="2026-10-11"] .cell-classes').count(), 0, 'nothing before the semester');
+  // Move to the fortnight that contains 2026-10-12 (the first semester week).
+  for (let step = 0; step < 30 && !(await page.locator('[data-date="2026-10-12"]').count()); step++) await page.getByRole('button', { name: (await page.locator('[data-date]').first().getAttribute('data-date')) < '2026-10-12' ? '下一段' : '上一段' }).click();
+  // Classes sit in the cell timeline with the other events, tagged 课.
+  await page.waitForSelector('[data-date="2026-10-12"] .class-event', { state: 'attached' });
+  const mondayClasses = await page.evaluate(() => [...document.querySelectorAll('[data-date="2026-10-12"] .class-event')].map(item => item.querySelector('span')?.textContent));
+  assert.ok(mondayClasses.includes('AR 讲课') && mondayClasses.includes('MC 讲课'), `Monday classes: ${mondayClasses}`);
+  assert.equal(await page.locator('[data-date="2026-10-16"] .class-event').count(), 0, 'no classes on Friday');
+  assert.equal(await page.locator('[data-date="2026-10-11"] .class-event').count(), 0, 'nothing before the semester');
+  // Diary status: a written day shows a green 日记✓ on the desktop calendar (never the text itself).
+  assert.equal(await page.locator('[data-date="2026-10-12"] .journal-mark.done').count(), 0);
+  await page.evaluate(() => {
+    const raw = localStorage.getItem('shiri-data:local');
+    const data = JSON.parse(raw);
+    data.journal = [{ date: '2026-10-12', text: 'smoke diary', updatedAt: new Date().toISOString() }];
+    localStorage.setItem('shiri-data:local', JSON.stringify(data));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'shiri-data:local', newValue: JSON.stringify(data), storageArea: localStorage }));
+  });
+  await page.waitForSelector('[data-date="2026-10-12"] .journal-mark.done', { state: 'attached' });
+  assert.equal(await page.locator('[data-date="2026-10-12"] .journal-mark.done').textContent(), '日记✓');
+  assert.equal(await page.locator('[data-date="2026-10-12"]').evaluate(cell => cell.textContent.includes('smoke diary')), false, 'diary text stays off the desktop');
+  // Double-clicking the diary mark opens the dedicated diary window; what is typed there is saved.
+  const journalPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#journal'), timeout: 15000 });
+  await page.locator('[data-date="2026-10-12"] .journal-mark').dblclick();
+  const journalPage = await journalPagePromise;
+  await journalPage.waitForSelector('.jw-text');
+  assert.equal(await journalPage.locator('.jw-text').inputValue(), 'smoke diary');
+  await journalPage.locator('.jw-text').press('End');
+  await journalPage.locator('.jw-text').type(' plus');
+  await journalPage.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('shiri-data:local')).journal.some(entry => entry.text === 'smoke diary plus'), null, { timeout: 5000 });
+  await journalPage.close();
+  // 7-day view: hour labels on the time axis, no "now" line (the user asked for it to go).
+  await page.getByRole('button', { name: '7 天' }).click();
+  await page.getByRole('button', { name: '今天' }).click();
+  await page.waitForSelector('.day-cell.today .cell-axis', { state: 'attached' });
+  assert.equal(await page.locator('.now-marker').count(), 0);
+  // 08:00 测体重 in today's cell opens the small weight window; Enter saves the number.
+  const weightPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#weight?'), timeout: 15000 });
+  await page.locator('.day-cell.today .weight-event').click();
+  const weightPage = await weightPagePromise;
+  await weightPage.waitForSelector('.weight-input input');
+  await weightPage.locator('.weight-input input').fill('72.5');
+  await weightPage.locator('.weight-input input').press('Enter').catch(() => {});
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).weights || []).some(item => item.kg === 72.5), null, { timeout: 5000 });
+  // Once recorded, 测体重 disappears from the calendar (the number stays in 体重).
+  await page.waitForSelector('.day-cell.today .weight-event', { state: 'detached' });
+  // Back to the fortnight that the checks below expect.
+  await page.getByRole('button', { name: '两周' }).click();
+  for (let step = 0; step < 30 && !(await page.locator('[data-date="2026-10-12"]').count()); step++) await page.getByRole('button', { name: (await page.locator('[data-date]').first().getAttribute('data-date')) < '2026-10-12' ? '下一段' : '上一段' }).click();
+  // Hover hints on the desktop calendar are drawn by the page and go away when the pointer leaves.
+  await page.locator('[data-date="2026-10-12"] .class-event').first().hover();
+  await page.waitForSelector('.desktop-tip:not([hidden])', { timeout: 5000 });
+  assert.match(await page.locator('.desktop-tip').textContent(), /课|讲课|练习|录像/);
+  assert.equal(await page.locator('[data-date="2026-10-12"] .class-event[title]').count(), 0, 'no native tooltip left on hovered items');
+  await page.mouse.move(2, 2);
+  await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: null })));
+  await page.waitForSelector('.desktop-tip[hidden]', { state: 'attached', timeout: 3000 });
+  // Clicking a class cycles its status (已上 → 待复习 …); double-clicking opens the class window.
+  const amClass = page.locator('[data-date="2026-10-12"] .class-event', { hasText: 'AR 讲课' }).first();
+  const before = await amClass.getAttribute('class');
+  await amClass.click();
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).classMarks || []).length === 1, null, { timeout: 5000 });
+  assert.notEqual(await amClass.getAttribute('class'), before);
+  const classPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#class?'), timeout: 15000 });
+  await amClass.dblclick();
+  const classPage = await classPagePromise;
+  await classPage.waitForSelector('.class-editor textarea');
+  await classPage.getByRole('radio', { name: '待复习' }).click();
+  await classPage.locator('.class-editor textarea').fill('smoke review note');
+  await classPage.getByRole('button', { name: '保存' }).click().catch(() => {});
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).classMarks || []).some(mark => mark.status === 'review' && mark.note === 'smoke review note'), null, { timeout: 5000 });
+  // The desktop calendar's 复盘 button opens the quick box; Enter saves one entry and keeps the box open.
+  const quickPagePromise = application.waitForEvent('window', { predicate: candidate => candidate.url().includes('#review-quick'), timeout: 15000 });
+  await page.getByRole('button', { name: '记一条复盘' }).click();
+  const quickPage = await quickPagePromise;
+  await quickPage.waitForSelector('.review-quick textarea');
+  await quickPage.locator('.review-quick textarea').fill('smoke reflection');
+  await quickPage.locator('.review-quick textarea').press('Enter');
+  assert.equal(await quickPage.locator('.review-quick textarea').inputValue(), '');
+  await page.waitForFunction(() => (JSON.parse(localStorage.getItem('shiri-data:local')).reflections || []).some(item => item.text === 'smoke reflection'), null, { timeout: 5000 });
+  // Esc closes the box (the page goes away while the key press is still being reported).
+  const quickClosed = quickPage.waitForEvent('close', { timeout: 5000 });
+  await quickPage.locator('.review-quick textarea').press('Escape').catch(() => {});
+  await quickClosed;
   await application.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find(item => item.webContents.getURL().endsWith('#desktop'));
     window.setMinimumSize(560, 240);

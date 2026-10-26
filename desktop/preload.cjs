@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   setCalendarInteractive: (interactive) => ipcRenderer.invoke('desktop:set-calendar-interactive', interactive),
   passDesktopContextMenu: () => ipcRenderer.invoke('desktop:pass-context-menu'),
   openEditor: (request) => ipcRenderer.invoke('desktop:open-editor', request),
+  openJournalWindow: (date) => ipcRenderer.invoke('desktop:open-journal', date),
+  openReviewQuick: () => ipcRenderer.invoke('desktop:open-review-quick'),
+  openClassEditor: (request) => ipcRenderer.invoke('desktop:open-class-editor', request),
+  openWeightEditor: (date) => ipcRenderer.invoke('desktop:open-weight', date),
   openInlineEditor: (request) => ipcRenderer.invoke('desktop:open-inline-editor', request),
   closeEditor: (seq) => ipcRenderer.invoke('desktop:close-editor', typeof seq === 'number' ? seq : undefined),
   cellEditorReady: () => ipcRenderer.invoke('desktop:cell-editor-ready'),
@@ -31,4 +35,6 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   onCellEditorOpen: (callback) => subscribe('desktop:cell-editor-open', callback),
   onCellEditorBlur: (callback) => subscribe('desktop:cell-editor-blur', callback),
   onPointerReset: (callback) => subscribe('desktop:pointer-reset', callback),
+  onJournalOpen: (callback) => subscribe('desktop:journal-open', callback),
+  onReviewQuickOpen: (callback) => subscribe('desktop:review-quick-open', callback),
 }));

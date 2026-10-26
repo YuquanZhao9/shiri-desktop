@@ -19,13 +19,14 @@ async function sha256(text: string): Promise<string> {
 interface Ctx {
   userId: string; now: number;
   tasks: Map<string, Task>; lists: TaskList[]; timetable?: Timetable;
+  stored: Map<string, string>; // taskId -> 读取时云端的 modified_at，写入前用来检查有没有被别的设备改过
   links: Map<string, string>; // externalId -> taskId
   dirty: Map<string, Task>; newLinks: { external_id: string; task_id: string; source: string }[];
 }
 
 async function load(userId: string): Promise<Ctx> {
   const [tasks, lists, timetable, links] = await Promise.all([
-    admin.from('shiri_tasks').select('payload').eq('user_id', userId),
+    admin.from('shiri_tasks').select('payload, modified_at').eq('user_id', userId),
     admin.from('shiri_lists').select('payload').eq('user_id', userId),
     admin.from('shiri_timetable').select('payload').eq('user_id', userId).maybeSingle(),
     admin.from('shiri_ai_links').select('external_id, task_id').eq('user_id', userId),
@@ -37,6 +38,7 @@ async function load(userId: string): Promise<Ctx> {
   return {
     userId, now: Date.now(),
     tasks: new Map((tasks.data ?? []).map((row: { payload: Task }) => [row.payload.id, row.payload])),
+    stored: new Map((tasks.data ?? []).map((row: { payload: Task; modified_at: string }) => [row.payload.id, row.modified_at])),
     lists: listRows.length ? listRows : defaultData().lists,
     timetable: table,
     links: new Map((links.data ?? []).map((row: { external_id: string; task_id: string }) => [row.external_id, row.task_id])),
@@ -91,6 +93,9 @@ function run(ctx: Ctx, op: Record<string, unknown>): unknown {
       const existing = ctx.tasks.get(ctx.links.get(ext) ?? '');
       // 用户已经删掉的就不再加回来（例如同一封邮件被再次处理）。
       if (existing?.deletedAt) return { status: 'skipped_deleted', event: null };
+      // 已经做完的也不改（2026-10-21 同一封邮件里的新事项把已完成的旧日程改掉了）；确实要改就传 force: true，
+      // 或者换一个 externalId 新建。
+      if (existing && existing.repeat === 'none' && existing.completed && op.force !== true) return { status: 'skipped_completed', event: eventView(existing, ctx.lists, ext) };
       if (existing) {
         const next = applyFields(existing, op.event, ctx.lists);
         if (JSON.stringify({ ...next, updatedAt: '' }) === JSON.stringify({ ...existing, updatedAt: '' })) return { status: 'unchanged', event: eventView(existing, ctx.lists, ext) };
@@ -132,6 +137,14 @@ function run(ctx: Ctx, op: Record<string, unknown>): unknown {
 
 async function commit(ctx: Ctx) {
   if (ctx.dirty.size) {
+    // 读取到写入之间，电脑或手机可能刚改过同一条；直接覆盖会把那次修改丢掉。有变化就整批放弃，让调用方重新读取再试。
+    const ids = [...ctx.dirty.keys()].filter(id => ctx.stored.has(id));
+    if (ids.length) {
+      const { data, error } = await admin.from('shiri_tasks').select('id, modified_at').eq('user_id', ctx.userId).in('id', ids);
+      if (error) throw new ApiError(500, 'storage_error', error.message);
+      const changed = (data ?? []).filter((row: { id: string; modified_at: string }) => Date.parse(row.modified_at) !== Date.parse(ctx.stored.get(row.id)!));
+      if (changed.length) throw new ApiError(409, 'conflict', `日程 ${changed.map((row: { id: string }) => row.id).join('、')} 刚在别的设备上改过，这次没有写入，请重新读取后再试`);
+    }
     const rows = [...ctx.dirty.values()].map(task => ({
       user_id: ctx.userId, id: task.id, payload: task, deleted: !!task.deletedAt,
       modified_at: task.deletedAt && task.deletedAt > task.updatedAt ? task.deletedAt : task.updatedAt,

@@ -44,6 +44,10 @@ const CELL_EDITOR_EXPANDED_HEIGHT = 382;
 let mainWindow = null;
 let desktopWindow = null;
 const editorWindows = new Set();
+let journalWindow = null;
+let reviewQuickWindow = null;
+let classEditorWindow = null;
+let weightWindow = null;
 // One focusable cell editor is created in advance and reused, so a double-click
 // only moves and reveals it instead of starting a new renderer each time.
 let cellEditorWindow = null;
@@ -70,7 +74,7 @@ let desktopHost = null;
 let calendarInteractive = false;
 let shortcutRegistered = false;
 let lastError = null;
-let settings = { opacity: 1, autostart: false, startupMode: 'desktop', widgetSpan: 'twoWeeks', widgetSide: 'right' };
+let settings = { opacity: 1, autostart: false, startupMode: 'desktop', widgetSpan: 'focus', widgetSide: 'right', layoutVersion: 2 };
 let settingsFile;
 let reminders;
 let reminderTimer;
@@ -488,6 +492,150 @@ async function openEditor(request) {
   }
 }
 
+// 专属日记窗口：只开一个，再次打开别的日期时切换过去（页面里会先保存当前那天）。
+async function openJournalWindow(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日记日期无效。');
+  if (journalWindow && !journalWindow.isDestroyed()) {
+    journalWindow.webContents.send('desktop:journal-open', date);
+    if (journalWindow.isMinimized()) journalWindow.restore();
+    if (!smokeTest) { setCalendarInteractive(false); journalWindow.show(); journalWindow.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  }
+  const journal = new BrowserWindow({
+    title: '昱时 · 日记',
+    width: 880, height: 720, minWidth: 520, minHeight: 440, backgroundColor: '#f5efe4',
+    show: false, autoHideMenuBar: true, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  journalWindow = journal;
+  editorWindows.add(journal);
+  journal.on('closed', () => { editorWindows.delete(journal); if (journalWindow === journal) journalWindow = null; });
+  secureContents(journal);
+  try {
+    await loadSurface(journal, `journal?date=${date}`);
+    if (!smokeTest) {
+      setCalendarInteractive(false);
+      journal.show();
+      journal.focus();
+    }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    journal.destroy();
+    throw error;
+  }
+}
+
+// 快速记复盘的小窗口：桌面日历按钮或 Ctrl+Alt+F 打开，回车记一条，Esc 关闭。
+async function openReviewQuick() {
+  if (reviewQuickWindow && !reviewQuickWindow.isDestroyed()) {
+    if (!smokeTest) { setCalendarInteractive(false); reviewQuickWindow.show(); reviewQuickWindow.focus(); }
+    reviewQuickWindow.webContents.send('desktop:review-quick-open');
+    return { ok: true, ...snapshot('editor') };
+  }
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 480, height = 300;
+  const quick = new BrowserWindow({
+    title: '昱时 · 记一条复盘',
+    width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + work.height * 0.22),
+    minWidth: 360, minHeight: 220, backgroundColor: '#fffaf0', alwaysOnTop: true, skipTaskbar: false,
+    show: false, autoHideMenuBar: true, minimizable: false, maximizable: false, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  reviewQuickWindow = quick;
+  editorWindows.add(quick);
+  quick.on('closed', () => { editorWindows.delete(quick); if (reviewQuickWindow === quick) reviewQuickWindow = null; });
+  secureContents(quick);
+  try {
+    await loadSurface(quick, 'review-quick');
+    if (!smokeTest) { setCalendarInteractive(false); quick.show(); quick.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    quick.destroy();
+    throw error;
+  }
+}
+
+// 一节课的状态和备注：桌面日历上双击课程打开的小窗口（只开一个，再双击别的课就换过去）。
+async function openClassEditor(request) {
+  if (!request || typeof request !== 'object' || typeof request.slotId !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(request.slotId)
+      || typeof request.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(request.date)) throw new Error('课程信息无效。');
+  const hash = `class?slot=${request.slotId}&date=${request.date}`;
+  if (classEditorWindow && !classEditorWindow.isDestroyed()) {
+    await loadSurface(classEditorWindow, hash);
+    if (!smokeTest) { setCalendarInteractive(false); classEditorWindow.show(); classEditorWindow.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  }
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 420, height = 330;
+  const editor = new BrowserWindow({
+    title: '昱时 · 这节课',
+    width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + work.height * 0.22),
+    minWidth: 360, minHeight: 280, backgroundColor: '#f6fbfa', alwaysOnTop: true,
+    show: false, autoHideMenuBar: true, minimizable: false, maximizable: false, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  classEditorWindow = editor;
+  editorWindows.add(editor);
+  editor.on('closed', () => { editorWindows.delete(editor); if (classEditorWindow === editor) classEditorWindow = null; });
+  secureContents(editor);
+  try {
+    await loadSurface(editor, hash);
+    if (!smokeTest) { setCalendarInteractive(false); editor.show(); editor.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    editor.destroy();
+    throw error;
+  }
+}
+
+// 填体重的小窗口：桌面日历上点 08:00 的“测体重”打开（只开一个）。
+async function openWeightEditor(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('日期无效。');
+  const hash = `weight?date=${date}`;
+  if (weightWindow && !weightWindow.isDestroyed()) {
+    await loadSurface(weightWindow, hash);
+    if (!smokeTest) { setCalendarInteractive(false); weightWindow.show(); weightWindow.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  }
+  const work = screen.getPrimaryDisplay().workArea;
+  const width = 380, height = 290;
+  const editor = new BrowserWindow({
+    title: '昱时 · 测体重',
+    width, height, x: Math.round(work.x + (work.width - width) / 2), y: Math.round(work.y + work.height * 0.22),
+    minWidth: 320, minHeight: 250, backgroundColor: '#f7f8fb', alwaysOnTop: true,
+    show: false, autoHideMenuBar: true, minimizable: false, maximizable: false, icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+      allowRunningInsecureContent: false, webviewTag: false,
+    },
+  });
+  weightWindow = editor;
+  editorWindows.add(editor);
+  editor.on('closed', () => { editorWindows.delete(editor); if (weightWindow === editor) weightWindow = null; });
+  secureContents(editor);
+  try {
+    await loadSurface(editor, hash);
+    if (!smokeTest) { setCalendarInteractive(false); editor.show(); editor.focus(); }
+    return { ok: true, ...snapshot('editor') };
+  } catch (error) {
+    editor.destroy();
+    throw error;
+  }
+}
+
 function showNotification(value) {
   const options = validateNotification(value);
   if (smokeTest) return { ok: false, error: '隐藏测试环境禁止显示系统通知。' };
@@ -608,7 +756,7 @@ function registerIpc() {
   handle('desktop:get-settings', () => snapshot());
   handle('desktop:set-mode', (value) => queueMode(value));
   handle('desktop:set-widget-span', (value) => {
-    if (!['week', 'twoWeeks', 'month'].includes(value)) throw new Error('未知的桌面日历范围。');
+    if (!['focus', 'week', 'twoWeeks', 'month'].includes(value)) throw new Error('未知的桌面日历范围。');
     return queueWidgetLayout({ widgetSpan: value });
   });
   handle('desktop:set-widget-side', (value) => {
@@ -633,6 +781,10 @@ function registerIpc() {
     }
   });
   handle('desktop:open-editor', (request) => openEditor(request));
+  handle('desktop:open-journal', (date) => openJournalWindow(date));
+  handle('desktop:open-review-quick', () => openReviewQuick());
+  handle('desktop:open-class-editor', (request) => openClassEditor(request));
+  handle('desktop:open-weight', (date) => openWeightEditor(date));
   ipcMain.handle('desktop:open-inline-editor', async (event, request) => {
     const testSurface = smokeTest && event.sender === mainWindow?.webContents && event.sender.getURL().endsWith('#desktop');
     if (!isTrustedFrame(event) || (event.sender !== desktopWindow?.webContents && !testSurface))
@@ -742,6 +894,7 @@ function refreshTrayMenu() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: process.platform === 'darwin' ? '打开管理窗口  ⌥⌘D' : '打开管理窗口  Ctrl+Alt+D', click: () => { void showWindow(); } },
+    { label: process.platform === 'darwin' ? '记一条复盘  ⌥⌘F' : '记一条复盘  Ctrl+Alt+F', click: () => { void openReviewQuick().catch(() => {}); } },
     { label: '常驻桌面（主屏）', type: 'checkbox', checked: mode === 'desktop', enabled: process.platform === 'win32', click: () => { void queueMode(mode === 'desktop' ? 'window' : 'desktop'); } },
     { type: 'separator' },
     { label: '退出昱时（停止提醒）', click: () => { void quitApplication(); } },
@@ -883,7 +1036,10 @@ if (hasLock) {
     settings.autostart = saved.autostart === true;
     settings.autostartDefaulted = saved.autostartDefaulted === true;
     settings.startupMode = resolveStartupMode(saved.startupMode);
-    settings.widgetSpan = ['week', 'twoWeeks', 'month'].includes(saved.widgetSpan) ? saved.widgetSpan : 'twoWeeks';
+    // 2026-10-13 起默认改成 7 天（左边今天大格，右边 6 天）；之前的“两周”默认值换成新样子，只在内存里换，下次保存时才写入。
+    settings.widgetSpan = ['focus', 'week', 'twoWeeks', 'month'].includes(saved.widgetSpan) ? saved.widgetSpan : 'focus';
+    if (saved.layoutVersion !== 2 && settings.widgetSpan === 'twoWeeks') settings.widgetSpan = 'focus';
+    settings.layoutVersion = 2;
     settings.widgetSide = ['left', 'right'].includes(saved.widgetSide) ? saved.widgetSide : 'right';
     reminders = new ReminderStore(path.join(app.getPath('userData'), 'scheduled-reminders.json'));
     registerIpc();
@@ -892,6 +1048,8 @@ if (hasLock) {
       tray.setToolTip('昱时 · 日历与清单');
       tray.on('double-click', () => { void showWindow(); });
       shortcutRegistered = globalShortcut.register('CommandOrControl+Alt+D', () => { void showWindow(); });
+      // 随手记一条复盘；被别的软件占用时不影响其他功能。
+      try { globalShortcut.register('CommandOrControl+Alt+F', () => { void openReviewQuick().catch(() => {}); }); } catch { /* ignore */ }
       refreshTrayMenu();
       reminderTimer = setInterval(deliverReminders, 15_000);
       powerMonitor.on('resume', deliverReminders);

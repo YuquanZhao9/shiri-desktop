@@ -1,15 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode, TouchEvent } from 'react';
-import { Bell, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Share, Star, Trash2, UserRound } from 'lucide-react';
+import { Bell, BookOpen, CalendarDays, Copy, GraduationCap, KeyRound, Check, ChevronLeft, ChevronRight, Cloud, Download, Inbox, ListTodo, LogOut, Plus, RefreshCw, Repeat2, Scale, Share, Star, Trash2, UserRound } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, TaskList, Timetable, TimetableSlot } from '@shared/types';
 import { addDays, dateKey, defaultData, formatLunar, isDone, mergeTasks, monthDays, parseDate, tasksForDate, TASK_COLORS, todayKey, toggleTask, validateBackup } from '@shared/core';
-import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, effectiveTimetable, slotsForWeekday } from '@shared/timetable';
+import { breaksOf, cellLayout, classesForDate, CLASS_COLOR, dayAgenda, doneToBottom, effectiveTimetable, oneOffSlots, weekGridSlots } from '@shared/timetable';
 import type { AgendaItem, DayClass, PeriodRow } from '@shared/timetable';
 import { createCloudClient, cloudErrorMessage, listsForTasks, PASSWORD_RESET_REDIRECT, requestPasswordReset, signIn, signUp, syncTasks, updatePassword } from '@shared/cloud';
 import { dayMark, festivalName, germanHoliday, GERMAN_STATES } from '@shared/holidays';
 import type { GermanState } from '@shared/holidays';
-import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncLists, syncTimetable } from './sync';
+import { accountKey, applyRemoteLists, cloudConfig, saveCloudConfig, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable, syncWeekly } from './sync';
+import { addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from '@shared/reflections';
+import { Review } from './Review';
+import { WeightChart, WeightHistorySheet, WeightRow } from './Weight';
+import { setWeight, WEIGHT_TIME, weightHistory, weightOn } from '@shared/weight';
+import { GoalMarkSheet, WeeklyCard, WeeklySheet } from './Weekly';
+import type { WeeklyActions } from './Weekly';
+import { ClassSheet, ReviewClassCard } from './Classes';
+import { CLASS_STATE_COLOR, CLASS_STATUS_LABEL, classMarkFor, classState, setClassMark } from '@shared/classes';
+import type { ClassStatus } from '@shared/types';
+import { activeGoals, addMark, autoPlanWeek, replanWeek, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, markDuration, marksOn, mergeItems, moveMark, removeMark, saveGoal as saveGoalItem, setMarkDone, timedMarksOn } from '@shared/weekly';
+import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
 import type { AiTokenInfo } from '@shared/ai-token';
@@ -37,7 +48,7 @@ const endTime = (time: string, duration: number) => {
 const hashDate = () => { const match = /^#date=(\d{4}-\d{2}-\d{2})$/.exec(location.hash); try { return match ? (parseDate(match[1]), match[1]) : ''; } catch { return ''; } };
 const hasPasswordRecoveryLink = () => new URLSearchParams(location.search).get('password-reset') === '1' || /(?:^|&)type=recovery(?:&|$)/.test(location.hash.slice(1));
 
-type Tab = 'calendar' | 'list' | 'timetable' | 'me';
+type Tab = 'calendar' | 'list' | 'journal' | 'timetable' | 'me';
 
 
 export default function App() {
@@ -52,7 +63,7 @@ export default function App() {
   const [selected, setSelected] = useState(() => hashDate() || todayKey());
   const [cursor, setCursor] = useState(() => { const d = parseDate(hashDate() || todayKey()); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [compact, setCompact] = useState(() => pref('shiri-m-compact', 'false') === 'true');
-  const [tab, setTab] = useState<Tab>(() => hasPasswordRecoveryLink() ? 'me' : 'calendar');
+  const [tab, setTab] = useState<Tab>(() => hasPasswordRecoveryLink() ? 'me' : location.hash === '#review' ? 'journal' : 'calendar');
   const [passwordRecovery, setPasswordRecovery] = useState(hasPasswordRecoveryLink);
   const [editing, setEditing] = useState<{ task: Task; isNew: boolean } | null>(null);
   const [quick, setQuick] = useState('');
@@ -64,6 +75,20 @@ export default function App() {
   const [showTimetable, setShowTimetable] = useState(() => pref('shiri-timetable', '1') !== '0');
   const gridRef = useRef<HTMLDivElement>(null);
   const [hideDone, setHideDone] = useState(() => pref('shiri-m-hide-done', 'false') === 'true');
+  const [journalDate, setJournalDate] = useState<string | null>(null);
+  const [journalReminder, setJournalReminder] = useState(() => pref('shiri-journal-reminder', '1') !== '0');
+  const [reviewReminder, setReviewReminder] = useState(() => pref('shiri-review-reminder', '1') !== '0');
+  const [goalReminder, setGoalReminder] = useState(() => pref('shiri-goal-reminder', '1') !== '0');
+  const [weightReminder, setWeightReminder] = useState(() => pref('shiri-weight-reminder', '1') !== '0');
+  // 完成的日程放到当天最下面、不显示时间（我的 → 日程显示 里可关）。
+  const [doneBottom, setDoneBottom] = useState(() => pref('shiri-done-bottom', '1') !== '0');
+  const [weightOpen, setWeightOpen] = useState(false);
+  const [weeklyOpen, setWeeklyOpen] = useState(false);
+  const [markOpen, setMarkOpen] = useState<string | null>(null);
+  const syncedOnce = useRef(false);
+  const [classOpen, setClassOpen] = useState<{ slotId: string; title: string; time: string; end: string; date: string } | null>(null);
+  const [notebook, setNotebook] = useState<'journal' | 'review'>(() => location.hash === '#review' ? 'review' : 'journal');
+  const [reviewMode, setReviewMode] = useState<'day' | 'week' | 'month'>(() => location.hash === '#review' ? 'week' : 'day');
 
   const dataRef = useRef(data); dataRef.current = data;
   const keyRef = useRef(storageKey); keyRef.current = storageKey;
@@ -91,7 +116,11 @@ export default function App() {
   useEffect(() => { const t = setInterval(() => setToday(todayKey()), 30_000); return () => clearInterval(t); }, []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), toast.undo ? 6000 : 3500); return () => clearTimeout(t); }, [toast]);
   useEffect(() => {
-    const open = () => { const key = hashDate(); if (key) { pick(key); setTab('calendar'); history.replaceState(null, '', location.pathname); } };
+    const open = () => {
+      // 周日复盘提醒点开：直接到本周汇总。
+      if (location.hash === '#review') { setTab('journal'); setNotebook('review'); setReviewMode('week'); history.replaceState(null, '', location.pathname); return; }
+      const key = hashDate(); if (key) { pick(key); setTab('calendar'); history.replaceState(null, '', location.pathname); }
+    };
     open(); window.addEventListener('hashchange', open); return () => window.removeEventListener('hashchange', open);
   }, []);
 
@@ -135,6 +164,19 @@ export default function App() {
       if (timetable && keyRef.current === key) {
         setData(prev => prev.timetable && prev.timetable.updatedAt > timetable.updatedAt || JSON.stringify(prev.timetable) === JSON.stringify(timetable) ? prev : { ...prev, timetable });
       }
+      const weekly = await syncWeekly(client, owner.id, dataRef.current.goals, dataRef.current.goalMarks, dataRef.current.classMarks, dataRef.current.weights);
+      if (weekly && keyRef.current === key) {
+        setData(prev => { const goals = mergeItems(prev.goals, weekly.goals), goalMarks = mergeItems(prev.goalMarks, weekly.marks), classMarks = mergeItems(prev.classMarks, weekly.classMarks), weights = mergeItems(prev.weights, weekly.weights); return JSON.stringify(goals) === JSON.stringify(mergeItems(prev.goals)) && JSON.stringify(goalMarks) === JSON.stringify(mergeItems(prev.goalMarks)) && JSON.stringify(classMarks) === JSON.stringify(mergeItems(prev.classMarks)) && JSON.stringify(weights) === JSON.stringify(mergeItems(prev.weights)) ? prev : { ...prev, goals, goalMarks, classMarks, weights }; });
+      }
+      const reflections = await syncReflections(client, owner.id, dataRef.current.reflections);
+      if (reflections && keyRef.current === key) {
+        setData(prev => { const merged = mergeReflections(prev.reflections, reflections); return JSON.stringify(merged) === JSON.stringify(mergeReflections(prev.reflections)) ? prev : { ...prev, reflections: merged }; });
+      }
+      const journal = await syncJournal(client, owner.id, dataRef.current.journal);
+      if (journal && keyRef.current === key) {
+        setData(prev => { const merged = mergeJournal(prev.journal, journal); return JSON.stringify(merged) === JSON.stringify(prev.journal ?? []) ? prev : { ...prev, journal: merged }; });
+      }
+      syncedOnce.current = true;
       setSyncState(`已同步 · ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`);
     } catch (error) {
       setSyncState(navigator.onLine ? '同步失败，已保存在本机' : '离线 · 已保存在本机');
@@ -169,6 +211,23 @@ export default function App() {
   const colorOf = (task: Task) => task.color || listOf(task.listId).color;
   const timetable = effectiveTimetable(data.timetable);
   // 与电脑版相同：学期内、非德国假日、当天有课的工作日才显示；空时段画成淡虚线框。
+  // 自动排周次任务时要避开的时间：课程和带时间的日程。
+  const busyOf = (snapshot: AppData) => {
+    const live = snapshot.tasks.filter(t => !t.deletedAt);
+    const table = effectiveTimetable(snapshot.timetable);
+    const toMinutes = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+    return (date: string): [number, number][] => [
+      ...(classesForDate(table, date, !!germanHoliday(date, germanState)) ?? []).flatMap(row => row.slots).map(slot => [toMinutes(slot.start), toMinutes(slot.end)] as [number, number]),
+      ...tasksForDate(live, date).filter(t => t.time).map(t => [toMinutes(t.time), toMinutes(t.time) + t.duration] as [number, number]),
+    ];
+  };
+  // 每周自动把周次任务排进空闲时间（等第一次同步完，免得和电脑上改过的打架）。
+  useEffect(() => {
+    if (!ready || (user && !syncedOnce.current) || !activeGoals(data.goals).length) return;
+    const added = autoPlanWeek(data.goals, data.goalMarks, today, Date.now(), busyOf(data));
+    if (added.length) setData(prev => ({ ...prev, goalMarks: mergeItems(prev.goalMarks, added) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.goals, data.goalMarks, data.tasks, today, ready, user, syncState, data.timetable, germanState]);
   const classRows = (key: string): PeriodRow[] | null => showTimetable ? classesForDate(timetable, key, !!germanHoliday(key, germanState)) : null;
   function commit(task: Task) {
     if (!ready) return;
@@ -205,6 +264,62 @@ export default function App() {
     if (!isNew && current && JSON.stringify({ ...current, updatedAt: '' }) === JSON.stringify({ ...next, updatedAt: '' })) { setEditing(null); return; }
     commit({ ...next, updatedAt: bump(current?.updatedAt ?? next.updatedAt) });
     setEditing(null);
+  }
+  function saveJournal(date: string, text: string) {
+    if (!ready) return;
+    setData(prev => { const journal = writeJournal(prev.journal, date, text); return journal === prev.journal || (!prev.journal && !journal.length) ? prev : { ...prev, journal }; });
+  }
+  function saveWeight(date: string, kg: number | null) {
+    if (!ready) return;
+    setData(prev => { const weights = setWeight(prev.weights, date, kg); return weights === prev.weights ? prev : { ...prev, weights }; });
+  }
+  function setClassStatus(slot: { id: string; title: string }, date: string, status: ClassStatus, note?: string) {
+    if (!ready) return;
+    setData(prev => { const classMarks = setClassMark(prev.classMarks, slot, date, status, note); return classMarks === prev.classMarks ? prev : { ...prev, classMarks }; });
+  }
+  const weeklyActions: WeeklyActions = {
+    // 改了时间设置就按新设置重排本周剩下的（做完的和挪过的不动）。
+    saveGoal: goal => {
+      if (!ready) return;
+      const id = goal.id || uid();
+      setData(prev => {
+        const goals = saveGoalItem(prev.goals, { ...goal, id });
+        if (goals === prev.goals) return prev;
+        if (!goal.id) return { ...prev, goals };
+        const { removed, added } = replanWeek(goals, prev.goalMarks, today, Date.now(), busyOf({ ...prev, goals }), uid, id);
+        let goalMarks = prev.goalMarks;
+        for (const markId of removed) goalMarks = removeMark(goalMarks, markId);
+        return { ...prev, goals, goalMarks: [...(goalMarks ?? []), ...added] };
+      });
+    },
+    replan: goalId => {
+      if (!ready) return;
+      let count = 0;
+      setData(prev => {
+        const { removed, added } = replanWeek(prev.goals, prev.goalMarks, today, Date.now(), busyOf(prev), uid, goalId);
+        count = added.length;
+        if (!removed.length && !added.length) return prev;
+        let goalMarks = prev.goalMarks;
+        for (const markId of removed) goalMarks = removeMark(goalMarks, markId);
+        return { ...prev, goalMarks: [...(goalMarks ?? []), ...added] };
+      });
+      setTimeout(() => say(count ? '已按现在的设置重新排好本周剩下的安排' : '本周没有可以重排的安排（做完的和挪过的不会动）'), 0);
+    },
+    openSettings: () => setWeeklyOpen(true),
+    deleteGoal: id => { if (ready) setData(prev => ({ ...prev, goals: deleteGoalItem(prev.goals, id) })); },
+    addMark: (goalId, date, done, time) => { if (!ready) return; const id = uid(); setData(prev => ({ ...prev, goalMarks: addMark(prev.goalMarks, goalId, date, done, id, Date.now(), time) })); },
+    moveMark: (id, date, time) => { if (ready) setData(prev => ({ ...prev, goalMarks: moveMark(prev.goalMarks, id, date, time) })); },
+    setMarkDone: (id, done) => { if (ready) setData(prev => ({ ...prev, goalMarks: setMarkDone(prev.goalMarks, id, done) })); },
+    removeMark: id => { if (ready) setData(prev => ({ ...prev, goalMarks: removeMark(prev.goalMarks, id) })); },
+  };
+  function addReview(date: string, text: string) {
+    if (!ready) return;
+    const id = uid();
+    setData(prev => { const reflections = addReflection(prev.reflections, date, text, id); return reflections === prev.reflections ? prev : { ...prev, reflections }; });
+  }
+  function editReview(id: string, text: string) {
+    if (!ready) return;
+    setData(prev => { const reflections = editReflection(prev.reflections, id, text); return reflections === prev.reflections ? prev : { ...prev, reflections }; });
   }
   function quickAdd(event: FormEvent, date: string) {
     event.preventDefault();
@@ -248,7 +363,7 @@ export default function App() {
   const monthLabel = `${cursor.year}年${cursor.month + 1}月`;
 
   // ---------- 界面 ----------
-  const row = (task: Task, date: string, showDate = false) => {
+  const row = (task: Task, date: string, showDate = false, hideTime = false) => {
     const done = date ? isDone(task, date) : task.completed;
     const list = listOf(task.listId);
     return (
@@ -258,7 +373,7 @@ export default function App() {
           <span className="task-title">{task.priority === 'high' && <Star className="flag" size={14} fill="currentColor" aria-label="星标" />}{task.title}</span>
           <span className="task-meta">
             {showDate && date && <span>{shortDay(date)}</span>}
-            <span>{task.time ? `${task.time}–${endTime(task.time, task.duration)}` : (date ? '全天' : '未安排日期')}</span>
+            <span>{task.time && !hideTime ? `${task.time}–${endTime(task.time, task.duration)}` : hideTime ? '已完成' : (date ? '全天' : '未安排日期')}</span>
             {task.repeat !== 'none' && <span className="meta-icon"><Repeat2 size={12} />{REPEATS[task.repeat]}</span>}
             <span className="dot" />{list.name}
           </span>
@@ -269,18 +384,42 @@ export default function App() {
   };
 
   // 日期格里的一条日程或课程；pos 给出它在时间轴上的位置。
-  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'task'
+  const pill = (item: AgendaItem, date: string, pos?: React.CSSProperties) => item.kind === 'weight'
+    ? <span key="weight" className={`pill weight${item.kg !== undefined ? ' done' : ''}`} style={{ '--c': '#C9822B', ...pos } as React.CSSProperties}>体重{item.kg !== undefined ? ` ${item.kg.toFixed(1)}` : ''}</span>
+    : item.kind === 'goal'
+    ? <span key={item.mark.id} className={`pill goal${item.mark.done ? ' done-goal' : ' planned'}`} style={{ '--c': item.goal.color, ...pos } as React.CSSProperties}>{item.goal.name}</span>
+    : item.kind === 'task'
     ? <span key={item.task.id} className={`pill${isDone(item.task, date) ? ' done' : ''}`} style={{ '--c': colorOf(item.task), ...pos } as React.CSSProperties}>{item.task.priority === 'high' && <b className="pill-star">★</b>}{item.task.title}</span>
-    : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_COLOR, ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
+    : <span key={`class-${item.slot.id}`} className={`pill class${item.slot.dashed ? ' dashed' : ''}${item.slot.alert ? ' alert' : ''}`} style={{ '--c': CLASS_STATE_COLOR[classState(classMarkFor(data.classMarks, item.slot.id, date), date, item.slot.end)], ...pos } as React.CSSProperties}><b className="class-tag">课</b>{item.slot.title}</span>;
 
   // 课程和日程排在同一列表里，统一用课程色。
-  const classRow = (slot: DayClass) => (
-    <li key={`class-${slot.id}`} className={`class-row${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_COLOR } as React.CSSProperties}>
-      <span className="class-time">{slot.start}<br />{slot.end}</span>
-      <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
-    </li>
-  );
-  const selectedAgenda = dayAgenda(dayTasks, classRows(selected));
+  const classRow = (slot: DayClass) => {
+    const mark = classMarkFor(data.classMarks, slot.id, selected);
+    const state = classState(mark, selected, slot.end);
+    return (
+      <li key={`class-${slot.id}`} className={`class-row status-${state}${slot.dashed ? ' dashed' : ''}`} style={{ '--c': CLASS_STATE_COLOR[state] } as React.CSSProperties} onClick={() => setClassOpen({ slotId: slot.id, title: slot.title, time: `${slot.start}–${slot.end}`, end: slot.end, date: selected })}>
+        <span className="class-time">{slot.start}<br />{slot.end}</span>
+        <span className="class-main"><b><i className="class-tag">课</i>{slot.title}</b>{mark?.note && <small className="class-note">{mark.note}</small>}{slot.note && <small>{slot.note}</small>}{slot.alert && <small className="alert">⚠ {slot.alert}</small>}</span>
+        {(state === 'done' || state === 'review') && <span className={`class-badge status-${state}`}>{CLASS_STATUS_LABEL[state]}</span>}
+      </li>
+    );
+  };
+  const goalRow = (goal: { id: string; name: string; color: string; duration?: number }, mark: { id: string; time?: string; done: boolean; duration?: number }) => {
+    const begin = Number(mark.time!.slice(0, 2)) * 60 + Number(mark.time!.slice(3));
+    const finish = begin + (mark.duration ?? goal.duration ?? 60);
+    return (
+      <li key={mark.id} className={`task-row goal-row${mark.done ? ' done-goal' : ''}`} style={{ '--c': goal.color } as React.CSSProperties}>
+        <button className="check" aria-label={mark.done ? '标为未完成' : '标为完成'} onClick={() => weeklyActions.setMarkDone(mark.id, !mark.done)}>{mark.done && <Check size={14} strokeWidth={3} />}</button>
+        <button className="task-main" onClick={() => setMarkOpen(mark.id)}>
+          <span className="task-title">{goal.name}</span>
+          <span className="task-meta"><span>{mark.time}–{String(Math.floor(finish / 60) % 24).padStart(2, '0')}:{String(finish % 60).padStart(2, '0')}</span><span className="dot" />周次任务{mark.done ? ' · 已完成' : ' · 安排'}</span>
+        </button>
+      </li>
+    );
+  };
+  // 测体重：今天和以前的日子可以填（补记），以后的日子不显示。
+  const selectedAgendaRaw = dayAgenda(dayTasks, classRows(selected), [], selected <= today && !weightOn(data.weights, selected) ? { time: WEIGHT_TIME, date: selected } : undefined);
+  const selectedAgenda = doneBottom ? doneToBottom(selectedAgendaRaw, task => isDone(task, selected)) : selectedAgendaRaw;
 
   const calendar = (
     <section className="page calendar-page">
@@ -304,21 +443,30 @@ export default function App() {
           const festival = festivalName(key);
           const german = germanHoliday(key, germanState);
           const outside = !compact && d.getMonth() !== cursor.month;
-          const layout = cellLayout(dayAgenda(tasks, classRows(key)));
+          const agenda = dayAgenda(tasks, classRows(key), [], key === today && !weightOn(data.weights, key) ? { time: WEIGHT_TIME, date: key } : undefined);
+          const layout = cellLayout(doneBottom ? doneToBottom(agenda, task => isDone(task, key)) : agenda);
           return (
             <button key={key} className={`cell${outside ? ' outside' : ''}${key === selected ? ' selected' : ''}${key === today ? ' today' : ''}${mark ? ` ${mark.kind}` : ''}`} onClick={() => key === selected && !compact ? setCompact(true) : pick(key)}>
               <span className="cell-head">
                 <span className="num">{d.getDate()}</span>
                 {mark && <span className="badge">{mark.kind === 'rest' ? '休' : '班'}</span>}
+                {hasJournal(data.journal, key) && <span className="diary-badge" aria-label="日记已写">记✓</span>}
               </span>
               <span className={`lunar${festival ? ' festival' : german ? ' german' : ''}`}>{festival || (german ? german.name : formatLunar(key))}</span>
               <CellHours>{layout.timed.map(placed => pill(placed.item, key, { top: `${placed.top * 100}%`, height: `${placed.height * 100}%`, left: `${placed.lane / placed.lanes * 100}%`, width: `${100 / placed.lanes}%` }))}</CellHours>
-              {layout.untimed.length > 0 && (compact
-                ? <span className="pills">
-                    {layout.untimed.slice(0, 2).map(item => pill(item, key))}
-                    {layout.untimed.length > 2 && <span className="more">+{layout.untimed.length - 2}</span>}
-                  </span>
-                : <span className="dots untimed">{layout.untimed.slice(0, 4).map(item => item.kind === 'task' && <i key={item.task.id} style={{ background: colorOf(item.task) }} />)}</span>)}
+              {(() => {
+                const doneCount = doneBottom ? layout.untimed.filter(item => item.kind === 'task' && isDone(item.task, key)).length : 0;
+                const open = doneBottom ? layout.untimed.filter(item => !(item.kind === 'task' && isDone(item.task, key))) : layout.untimed;
+                return <>
+                  {open.length > 0 && (compact
+                    ? <span className="pills">
+                        {open.slice(0, 2).map(item => pill(item, key))}
+                        {open.length > 2 && <span className="more">+{open.length - 2}</span>}
+                      </span>
+                    : <span className="dots untimed">{open.slice(0, 4).map(item => item.kind === 'task' && <i key={item.task.id} style={{ background: colorOf(item.task) }} />)}</span>)}
+                  {doneCount > 0 && <span className="done-mark">✓{doneCount}</span>}
+                </>;
+              })()}
             </button>
           );
         })}
@@ -333,8 +481,13 @@ export default function App() {
           <input value={quick} onChange={e => setQuick(e.target.value)} placeholder="添加日程，如“15:00 开会”" enterKeyHint="done" maxLength={200} />
           {quick && <button type="submit" className="quick-save">添加</button>}
         </form>
-        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected) : classRow(item.slot))}</ul>
+        {selectedAgenda.length ? <ul className="tasks">{selectedAgenda.map(item => item.kind === 'task' ? row(item.task, selected, false, doneBottom && !item.time && !!item.task.time) : item.kind === 'weight' ? <WeightRow key="weight" date={selected} weights={data.weights} onSave={kg => saveWeight(selected, kg)} onHistory={() => setWeightOpen(true)} /> : item.kind === 'goal' ? goalRow(item.goal, item.mark) : classRow(item.slot))}</ul>
           : <p className="empty">这一天还没有安排</p>}
+        <WeeklyCard goals={data.goals} marks={data.goalMarks} date={selected} onManage={() => setWeeklyOpen(true)} actions={weeklyActions} />
+        <button className={`diary-card${hasJournal(data.journal, selected) ? ' done' : ''}`} onClick={() => setJournalDate(selected)}>
+          <span className="diary-card-head"><BookOpen size={16} />日记<em>{hasJournal(data.journal, selected) ? '已完成' : selected === today ? '还没写' : '未写'}</em></span>
+          {hasJournal(data.journal, selected) ? <span className="diary-preview">{journalText(data.journal, selected).trim()}</span> : <span className="diary-preview muted">点这里写下这一天{selected === today && journalReminder ? `（${JOURNAL_REMINDER_TIME} 还没写会提醒）` : ''}</span>}
+        </button>
       </div>
     </section>
   );
@@ -365,16 +518,64 @@ export default function App() {
     );
   })();
 
+  const journalPage = (
+    <section className="page journal-page">
+      <header className="top">
+        <div className="seg">{([['journal', '日记'], ['review', '复盘']] as const).map(([value, label]) => <button key={value} className={notebook === value ? 'on' : ''} onClick={() => setNotebook(value)}>{label}</button>)}</div>
+        {notebook === 'journal' && <button className="today-btn" onClick={() => setJournalDate(today)}>{hasJournal(data.journal, today) ? '今天' : '写今天'}</button>}
+      </header>
+      {notebook === 'review' ? <div className="scroll"><Review reflections={data.reflections} today={today} mode={reviewMode} onMode={setReviewMode} remind={reviewReminder} onAdd={addReview} onEdit={editReview} /></div> : <div className="scroll">
+        {writtenEntries(data.journal).map(entry => (
+          <button key={entry.date} className="diary-item" onClick={() => setJournalDate(entry.date)}>
+            <b>{dayTitle(entry.date)}<small>{entry.date.slice(0, 4)}</small></b>
+            <span>{entry.text.trim()}</span>
+          </button>
+        ))}
+        {!writtenEntries(data.journal).length && <p className="empty">还没有日记。点右上角写下今天。</p>}
+      </div>}
+    </section>
+  );
+
   return (
     <div className="app">
       <main className="main">
         {tab === 'calendar' && calendar}
         {tab === 'list' && listPage}
+        {tab === 'journal' && journalPage}
+        {tab === 'timetable' && <ReviewClassCard marks={data.classMarks} onDone={mark => setClassStatus({ id: mark.slotId, title: mark.title }, mark.date, 'done')} onOpen={mark => { const slot = timetable.slots.find(s => s.id === mark.slotId); setClassOpen({ slotId: mark.slotId, title: mark.title, time: slot ? `${slot.start}–${slot.end}` : '', end: slot?.end ?? '00:00', date: mark.date }); }} />}
         {tab === 'timetable' && <TimetablePage timetable={timetable} today={today} visible={showTimetable} onVisible={value => { setShowTimetable(value); setPref('shiri-timetable', value ? '1' : '0'); }} />}
         {tab === 'me' && (
           <MePage
             config={config} client={client} user={user} authChecked={authChecked} syncState={syncState} data={data}
             pushOn={pushOn} lead={lead} germanState={germanState}
+            journalReminder={journalReminder}
+            reviewReminder={reviewReminder}
+            goalReminder={goalReminder}
+            weightReminder={weightReminder}
+            doneBottom={doneBottom}
+            onWeightHistory={() => setWeightOpen(true)}
+            latestWeight={weightHistory(data.weights)[0] ? `${weightHistory(data.weights)[0].kg.toFixed(1)} kg` : ''}
+            onDoneBottom={value => { setDoneBottom(value); setPref('shiri-done-bottom', value ? '1' : '0'); }}
+            onWeightReminder={async value => {
+              setWeightReminder(value); setPref('shiri-weight-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, reviewReminder, goalReminder, value).catch(e => say((e as Error).message));
+            }}
+            onGoalReminder={async value => {
+              setGoalReminder(value); setPref('shiri-goal-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, reviewReminder, value, weightReminder).catch(e => say((e as Error).message));
+            }}
+            onReviewReminder={async value => {
+              setReviewReminder(value); setPref('shiri-review-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, journalReminder, value, goalReminder, weightReminder).catch(e => say((e as Error).message));
+            }}
+            onJournalReminder={async value => {
+              setJournalReminder(value); setPref('shiri-journal-reminder', value ? '1' : '0');
+              const sub = await currentSubscription();
+              if (sub && client && user) await saveSubscription(client, user.id, sub, lead, value, reviewReminder, goalReminder, weightReminder).catch(e => say((e as Error).message));
+            }}
             onGermanState={value => { setGermanState(value); setPref('shiri-de-state', value); }} say={say} sync={() => void runSync()}
             onConfig={(url, key) => { const next = saveCloudConfig(url, key); setClient(next); setConfig(cloudConfig()); }}
             onPush={setPushOn}
@@ -387,14 +588,14 @@ export default function App() {
             onLead={async value => {
               setLead(value); setPref('shiri-reminder-lead', String(value));
               const sub = await currentSubscription();
-              if (sub && client && user) await saveSubscription(client, user.id, sub, value).catch(e => say((e as Error).message));
+              if (sub && client && user) await saveSubscription(client, user.id, sub, value, journalReminder, reviewReminder, goalReminder, weightReminder).catch(e => say((e as Error).message));
             }}
             onMergeLocal={() => {
               try {
                 const raw = localStorage.getItem(LOCAL_KEY);
                 if (!raw) { say('这台手机上没有未登录时记下的日程'); return; }
                 const local = validateBackup(JSON.parse(raw));
-                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))] }));
+                setData(prev => ({ ...prev, tasks: mergeTasks(prev.tasks, local.tasks), lists: [...prev.lists, ...local.lists.filter(l => !prev.lists.some(p => p.id === l.id))], ...(local.journal ? { journal: mergeJournal(prev.journal, local.journal) } : {}), ...(local.reflections ? { reflections: mergeReflections(prev.reflections, local.reflections) } : {}), ...(local.goals ? { goals: mergeItems(prev.goals, local.goals) } : {}), ...(local.goalMarks ? { goalMarks: mergeItems(prev.goalMarks, local.goalMarks) } : {}), ...(local.weights ? { weights: mergeItems(prev.weights, local.weights) } : {}) }));
                 say('已并入当前账号，正在同步');
               } catch { say('本机数据未能读取'); }
             }}
@@ -409,10 +610,16 @@ export default function App() {
       <nav className="tabbar">
         <TabButton on={tab === 'calendar'} onClick={() => setTab('calendar')} icon={<CalendarDays size={22} />} label="日历" />
         <TabButton on={tab === 'list'} onClick={() => setTab('list')} icon={<ListTodo size={22} />} label="清单" />
+        <TabButton on={tab === 'journal'} onClick={() => setTab('journal')} icon={<BookOpen size={22} />} label="日记" />
         <TabButton on={tab === 'timetable'} onClick={() => setTab('timetable')} icon={<GraduationCap size={22} />} label="课表" />
         <TabButton on={tab === 'me'} onClick={() => setTab('me')} icon={<UserRound size={22} />} label="我的" badge={!user && !!config} />
       </nav>
 
+      {classOpen && <ClassSheet key={`${classOpen.slotId}:${classOpen.date}`} title={classOpen.title} time={classOpen.time} date={classOpen.date} mark={classMarkFor(data.classMarks, classOpen.slotId, classOpen.date)} state={classState(classMarkFor(data.classMarks, classOpen.slotId, classOpen.date), classOpen.date, classOpen.end)} onSave={(status, note) => setClassStatus({ id: classOpen.slotId, title: classOpen.title }, classOpen.date, status, note)} onClose={() => setClassOpen(null)} />}
+      {markOpen && (() => { const mark = (data.goalMarks ?? []).find(m => m.id === markOpen && !m.deletedAt); const goal = mark && activeGoals(data.goals).find(g => g.id === mark.goalId); return mark && goal ? <GoalMarkSheet key={mark.id} goal={goal} mark={mark} onClose={() => setMarkOpen(null)} actions={weeklyActions} /> : null; })()}
+      {weightOpen && <WeightHistorySheet weights={data.weights} today={today} onClose={() => setWeightOpen(false)} />}
+      {weeklyOpen && <WeeklySheet goals={data.goals} marks={data.goalMarks} today={today} onClose={() => setWeeklyOpen(false)} actions={weeklyActions} />}
+      {journalDate && <JournalSheet key={journalDate} date={journalDate} text={journalText(data.journal, journalDate)} onSave={saveJournal} onClose={() => setJournalDate(null)} />}
       {editing && <Editor key={editing.task.id} task={editing.task} isNew={editing.isNew} lists={lists} onSave={save} onDelete={remove} onClose={() => setEditing(null)} />}
       {toast && (
         <div className="toast" role="status">
@@ -504,15 +711,51 @@ function Editor({ task, isNew, lists, onSave, onDelete, onClose }: { task: Task;
   );
 }
 
+/** 一天的日记：全屏输入，边写边存，点“完成”或关掉都会保存。 */
+function JournalSheet({ date, text, onSave, onClose }: { date: string; text: string; onSave: (date: string, text: string) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState(() => spaceParagraphs(text));
+  const pending = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const save = useRef(onSave); save.current = onSave;
+  const flush = useCallback(() => { clearTimeout(timer.current); if (pending.current !== null) { const value = pending.current; pending.current = null; save.current(date, value); } }, [date]);
+  useEffect(() => { if (pending.current === null) setDraft(spaceParagraphs(text)); }, [text]);
+  useEffect(() => flush, [flush]);
+  const change = (value: string) => { setDraft(value); pending.current = value; clearTimeout(timer.current); timer.current = setTimeout(flush, 800); };
+  const close = () => { flush(); onClose(); };
+  return (
+    <div className="sheet-layer journal-layer" onClick={close}>
+      <div className="sheet journal-sheet" onClick={e => e.stopPropagation()}>
+        <div className="sheet-bar">
+          <span className="text-btn strong" aria-hidden="true" style={{ visibility: 'hidden' }}>完成</span>
+          <span className="grab" />
+          <button type="button" className="text-btn strong" onClick={close}>完成</button>
+        </div>
+        <div className="journal-head">
+          <span className="journal-day">{parseDate(date).getDate()}</span>
+          <span><b>{parseDate(date).getFullYear()} 年 {parseDate(date).getMonth() + 1} 月 · {parseDate(date).toLocaleDateString('zh-CN', { weekday: 'long' })}</b><small>{festivalName(date) || `农历${formatLunar(date)}`}{date === todayKey() ? ' · 今天' : ''}</small></span>
+        </div>
+        <textarea className="journal-text" value={draft} autoFocus={!text} maxLength={JOURNAL_MAX_TEXT} placeholder={'今天过得怎么样？\n写下发生的事、心情，或者一句想对自己说的话。'} onKeyDown={e => handleParagraphEnter({ key: e.key, shiftKey: e.shiftKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode, preventDefault: () => e.preventDefault(), currentTarget: e.currentTarget }, change)} onChange={e => change(e.target.value)} onBlur={flush} />
+        <p className="journal-foot">{draft.trim() ? `${journalLength(draft)} 字 · 自动保存 · 只有你能看到` : '空白的日记不会保存'}</p>
+      </div>
+    </div>
+  );
+}
+
 interface MeProps {
   config: ReturnType<typeof cloudConfig>; client: SupabaseClient | null; user: { id: string; email?: string } | null; authChecked: boolean;
   syncState: string; data: AppData; pushOn: boolean; lead: number; germanState: GermanState; onGermanState: (value: GermanState) => void;
+  journalReminder: boolean; onJournalReminder: (value: boolean) => void;
+  reviewReminder: boolean; onReviewReminder: (value: boolean) => void;
+  goalReminder: boolean; onGoalReminder: (value: boolean) => void;
+  weightReminder: boolean; onWeightReminder: (value: boolean) => void;
+  doneBottom: boolean; onDoneBottom: (value: boolean) => void;
+  onWeightHistory: () => void; latestWeight: string;
   say: (text: string) => void; sync: () => void; onConfig: (url: string, key: string) => void;
   onPush: (on: boolean) => void; onLead: (value: number) => void; onMergeLocal: () => void;
   passwordRecovery: boolean; onRecoveryComplete: () => void;
 }
 
-function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
+function MePage({ config, client, user, authChecked, syncState, data, pushOn, lead, germanState, onGermanState, journalReminder, onJournalReminder, reviewReminder, onReviewReminder, goalReminder, onGoalReminder, weightReminder, onWeightReminder, doneBottom, onDoneBottom, onWeightHistory, latestWeight, say, sync, onConfig, onPush, onLead, onMergeLocal, passwordRecovery, onRecoveryComplete }: MeProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetOffer, setResetOffer] = useState('');
@@ -574,7 +817,7 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
     setBusy(true);
     try {
       if (pushOn) { await disablePush(client); onPush(false); say('已关闭这台手机的提醒'); }
-      else { await enablePush(client, user.id, lead); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
+      else { await enablePush(client, user.id, lead, journalReminder, reviewReminder, goalReminder, weightReminder); onPush(true); say('提醒已开启，到点会推送到这台手机'); }
     } catch (error) { say((error as Error).message); }
     finally { setBusy(false); }
   }
@@ -651,9 +894,24 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
           {!VAPID_PUBLIC_KEY ? <p className="muted">云端提醒服务还没配置。</p> : !standalone ? <p className="muted">从主屏幕图标打开昱时后才能开启提醒。</p> : !pushSupported() ? <p className="muted">需要 iOS 16.4 或更高版本。</p> : (
             <div className="stack">
               <label className="kv"><span>推送到这台手机</span><input type="checkbox" className="switch" checked={pushOn} disabled={busy || !user} onChange={() => void togglePush()} /></label>
-              <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
+              <p className="muted">每个设了具体时间的日程会在开始前 2 小时、1 小时、10 分钟各提醒一次。{!user && '登录后可开启。'}</p>
+              <label className="kv"><span>{JOURNAL_REMINDER_TIME} 还没写日记时提醒</span><input type="checkbox" className="switch" checked={journalReminder} disabled={busy} onChange={e => onJournalReminder(e.target.checked)} /></label>
+              <label className="kv"><span>每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总</span><input type="checkbox" className="switch" checked={reviewReminder} disabled={busy} onChange={e => onReviewReminder(e.target.checked)} /></label>
+              <label className="kv"><span>每天 {WEIGHT_TIME} 还没记体重时提醒</span><input type="checkbox" className="switch" checked={weightReminder} disabled={busy} onChange={e => onWeightReminder(e.target.checked)} /></label>
+              <label className="kv"><span>周五 {GOAL_REMINDER_TIME} 周次任务还差 2 次及以上时提醒</span><input type="checkbox" className="switch" checked={goalReminder} disabled={busy} onChange={e => onGoalReminder(e.target.checked)} /></label>
             </div>
           )}
+        </div>
+
+        <div className="card weight-card">
+          <h3><Scale size={17} />体重</h3>
+          <WeightChart weights={data.weights} today={todayKey()} />
+          <button className="secondary wide" onClick={onWeightHistory}>体重记录{latestWeight ? `（最近 ${latestWeight}）` : ''}</button>
+        </div>
+
+        <div className="card">
+          <h3><CalendarDays size={17} />日程显示</h3>
+          <label className="kv"><span>完成的日程放到当天最下面（不再显示时间）</span><input type="checkbox" className="switch" checked={doneBottom} onChange={e => onDoneBottom(e.target.checked)} /></label>
         </div>
 
         <div className="card">
@@ -667,6 +925,8 @@ function MePage({ config, client, user, authChecked, syncState, data, pushOn, le
         <div className="card">
           <h3><Download size={17} />数据</h3>
           <div className="kv"><span>日程</span><b>{data.tasks.filter(t => !t.deletedAt).length} 条</b></div>
+          <div className="kv"><span>日记</span><b>{writtenEntries(data.journal).length} 篇</b></div>
+          <div className="kv"><span>复盘</span><b>{(data.reflections ?? []).filter(r => !r.deletedAt).length} 条</b></div>
           <button className="secondary wide" onClick={() => void exportBackup()}><Download size={16} />导出备份</button>
         </div>
         <p className="footer">昱时 · iPhone 网页版 0.1.0</p>
@@ -699,11 +959,12 @@ function lanes(slots: TimetableSlot[]) {
 
 function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Timetable; today: string; visible: boolean; onVisible: (value: boolean) => void }) {
   const days = timetable.slots.some(slot => slot.day > 5) ? 7 : 5;
-  const all = timetable.slots;
+  const all = timetable.slots.filter(slot => !(slot.from && slot.from === slot.until));
+  const once = oneOffSlots(timetable, today);
   const first = all.length ? Math.min(...all.map(s => toMin(s.start))) : 8 * 60;
   const last = all.length ? Math.max(...all.map(s => toMin(s.end))) : 18 * 60;
   const from = Math.floor(first / 60) * 60, to = Math.ceil(last / 60) * 60;
-  const px = 0.9; // 每分钟高度
+  const px = 1.2; // 每分钟高度（够放下课名、时间和备注）
   const todayDay = today >= timetable.start && today <= timetable.end ? (parseDate(today).getDay() + 6) % 7 + 1 : 0;
   const [open, setOpen] = useState<TimetableSlot | null>(null);
   return (
@@ -717,16 +978,19 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
             <div className="tt-hours">{Array.from({ length: (to - from) / 60 + 1 }, (_, i) => <span key={i} style={{ top: i * 60 * px }}>{String(from / 60 + i).padStart(2, '0')}:00</span>)}</div>
             {Array.from({ length: days }, (_, d) => (
               <div key={d} className={`tt-col${d + 1 === todayDay ? ' now' : ''}`}>
-                {lanes(slotsForWeekday(timetable, d + 1)).map(({ slot, lane, lanes: count }) => (
+                {lanes(weekGridSlots(timetable, d + 1)).map(({ slot, lane, lanes: count }) => (
                   <button key={slot.id} className={`tt-slot${slot.dashed ? ' dashed' : ''}`} onClick={() => setOpen(slot)}
                     style={{ '--c': slot.color, top: (toMin(slot.start) - from) * px, height: (toMin(slot.end) - toMin(slot.start)) * px - 2, left: `${lane / count * 100}%`, width: `calc(${100 / count}% - 2px)` } as React.CSSProperties}>
-                    <b>{slot.title}</b><small>{slot.start}</small>
+                    <b>{slot.title}</b><small>{slot.start}–{slot.end}</small>{slot.note && <small className="tt-note">{slot.note}</small>}
                   </button>
                 ))}
               </div>
             ))}
           </div>
         </div>
+        {once.length > 0 && (
+          <div className="card legend"><h3>单次课程</h3>{once.map(slot => <button key={slot.id} className="legend-item once-item" onClick={() => setOpen(slot)}><i style={{ background: slot.color }} /><b>{slot.from!.slice(5).replace('-', '/')} {DAY_NAMES[slot.day - 1]}</b><span>{slot.start}–{slot.end} {slot.title}</span></button>)}</div>
+        )}
         {breaksOf(timetable).length > 0 && (
           <div className="card legend"><h3>停课期</h3>{breaksOf(timetable).map(item => <div key={item.start} className="legend-item"><b>{item.name}</b><span>{item.start.slice(5).replace('-', '/')} – {item.end.slice(5).replace('-', '/')}</span></div>)}</div>
         )}
@@ -737,7 +1001,7 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
       </div>
       {open && (
         <div className="toast slot-detail" onClick={() => setOpen(null)}>
-          <span><b>{open.title}</b> · {DAY_NAMES[open.day - 1]} {open.start}–{open.end}{open.note ? `\n${open.note}` : ''}</span>
+          <span><b>{open.title}</b> · {open.from && open.from === open.until ? `${open.from.slice(5).replace('-', '/')} ` : ''}{DAY_NAMES[open.day - 1]} {open.start}–{open.end}{open.note ? `\n${open.note}` : ''}</span>
           <button>好</button>
         </div>
       )}

@@ -1,10 +1,17 @@
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import type { Task } from './types';
+import type { JournalEntry, Task } from './types';
+import { journalReminders } from './journal';
+import { reviewReminders } from './reflections';
+import { goalReminders } from './weekly';
+import { weightReminders } from './weight';
+import type { WeightEntry } from './types';
+import type { GoalMark, WeeklyGoal } from './types';
+import type { Reflection } from './types';
 import { addDays, dateKey, tasksForDate, isDone } from './core';
 
-export interface DesktopSettings { mode: 'window'|'desktop'|'fullscreen'; surface?: 'desktop'|'app'|'editor'; opacity: number; autostart: boolean; desktopAvailable: boolean; widgetSpan: 'week'|'twoWeeks'|'month'; widgetSide: 'left'|'right'; lastError?: string; }
+export interface DesktopSettings { mode: 'window'|'desktop'|'fullscreen'; surface?: 'desktop'|'app'|'editor'; opacity: number; autostart: boolean; desktopAvailable: boolean; widgetSpan: 'focus'|'week'|'twoWeeks'|'month'; widgetSide: 'left'|'right'; lastError?: string; }
 export interface CellEditorRequest { taskId:string; date:string; time:string; keepDraft:boolean; seq:number; }
 declare global { interface Window { desktop?: {
   getSettings(): Promise<DesktopSettings>;
@@ -25,6 +32,12 @@ declare global { interface Window { desktop?: {
   onCellEditorOpen(cb:(request:CellEditorRequest)=>void):()=>void;
   onCellEditorBlur(cb:()=>void):()=>void;
   onPointerReset(cb:()=>void):()=>void;
+  openJournalWindow?(date:string):Promise<{ok:boolean;error?:string}>;
+  onJournalOpen?(cb:(date:string)=>void):()=>void;
+  openReviewQuick?():Promise<{ok:boolean;error?:string}>;
+  openClassEditor?(request:{slotId:string;date:string}):Promise<{ok:boolean;error?:string}>;
+  openWeightEditor?(date:string):Promise<{ok:boolean;error?:string}>;
+  onReviewQuickOpen?(cb:()=>void):()=>void;
 } } }
 export const isNative = Capacitor.isNativePlatform();
 const pendingWrites = new Map<string, Promise<void>>();
@@ -42,8 +55,8 @@ export async function writeSaved(key:string,value:string) {
   try { await next; }
   finally { if(pendingWrites.get(key)===next)pendingWrites.delete(key); }
 }
-// 默认每个日程提前 2 小时、1 小时、30 分钟、10 分钟各提醒一次。
-export const MULTI_REMINDER_LEADS=[120,60,30,10];
+// 默认每个日程提前 2 小时、1 小时、10 分钟各提醒一次（2026-10-18 用户要求去掉 30 分钟）。
+export const MULTI_REMINDER_LEADS=[120,60,10];
 export function leadLabel(minutes:number) {
   return minutes>=60&&minutes%60===0?`${minutes/60} 小时`:`${minutes} 分钟`;
 }
@@ -74,11 +87,13 @@ export async function enableNotifications() {
 }
 let scheduleRevision=0;
 let pendingSchedule:Promise<void>=Promise.resolve();
-export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes:number|number[]=0):Promise<void> {
+/** journal 不为 null 时，加上每天 21:00 还没写日记的提醒。 */
+export function scheduleNative(tasks:Task[],enabled:boolean,leadMinutes:number|number[]=0,journal:JournalEntry[]|null=null,reflections:Reflection[]|null=null,weekly:{goals?:WeeklyGoal[];marks?:GoalMark[]}|null=null,weights:WeightEntry[]|null=null):Promise<void> {
   const revision=++scheduleRevision;
   const next=pendingSchedule.catch(()=>{}).then(async()=>{
     if(revision!==scheduleRevision)return;
-    const queue=enabled?reminderQueue(tasks,30,Date.now(),leadMinutes):[];
+    const now=Date.now();
+    const queue=enabled?[...reminderQueue(tasks,30,now,leadMinutes),...(journal?journalReminders(journal,7,now):[]),...(reflections?reviewReminders(reflections,now):[]),...(weekly?goalReminders(weekly.goals,weekly.marks,now):[]),...(weights?weightReminders(weights,7,now):[])].sort((a,b)=>a.at-b.at):[];
     if(window.desktop) { const result=await window.desktop.syncReminders(queue); if(!result.ok) throw new Error(result.error); return; }
     if(isNative) {
       const pending=await LocalNotifications.getPending();

@@ -1,13 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, DragEvent, ReactNode } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, ChevronDown, Plus, Search, Settings, ListTodo, Inbox, Sun, X, Clock3, Repeat2, Trash2, ArrowUpRight, PanelRightClose, PanelRightOpen, Maximize2, Cloud, Download, Upload, Monitor, Smartphone, Bell, MoreHorizontal, CheckCheck, Circle, LogOut, RefreshCw, Menu, GraduationCap, Star } from 'lucide-react';
+import { flushSync } from 'react-dom';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, ChevronDown, Plus, Search, Settings, ListTodo, Inbox, Sun, X, Clock3, Repeat2, Trash2, ArrowUpRight, PanelRightClose, PanelRightOpen, Maximize2, Cloud, Download, Upload, Monitor, Smartphone, Bell, MoreHorizontal, CheckCheck, Circle, LogOut, RefreshCw, Menu, GraduationCap, Star, BookOpen, Lightbulb, Target, BookMarked, Scale } from 'lucide-react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, Task, Timetable, TimetableSlot } from './types';
-import { CLASS_COLOR, DEFAULT_TIMETABLE, breaksOf, cellLayout, classesForDate, dayAgenda, effectiveTimetable, slotsForWeekday, validateTimetable } from './timetable';
+import { CLASS_COLOR, DEFAULT_TIMETABLE, breaksOf, cellLayout, classesForDate, dayAgenda, dayFraction, doneToBottom, effectiveTimetable, oneOffSlots, weekGridSlots, validateTimetable } from './timetable';
 import type { AgendaItem } from './timetable';
-import { todayKey, dateKey, parseDate, addDays, monthDays, occursOn, isDone, toggleTask, moveTask, tasksForDate, formatLunar, validateBackup, defaultData, mergeTasks, TASK_COLORS } from './core';
+import { todayKey, dateKey, parseDate, addDays, monthDays, occursOn, isDone, toggleTask, moveTask, tasksForDate, formatLunar, validateBackup, defaultData, mergeTasks, TASK_COLORS, doneLast } from './core';
 import { createCloudClient, syncTasks, listsForTasks, cloudErrorMessage, requestPasswordReset, signIn, signUp, updatePassword } from './cloud';
-import { applyRemoteLists, subscribeLive, syncLists, syncTimetable } from './live-sync';
+import { applyRemoteLists, subscribeLive, syncJournal, syncLists, syncReflections, syncTimetable, syncWeekly } from './live-sync';
+import { activeReflections, addReflection, editReflection, mergeReflections, REVIEW_REMINDER_TIME } from './reflections';
+import { ReviewView } from './ReviewView';
+import { GoalDay, GoalStrip, WeeklyView } from './WeeklyView';
+import type { WeeklyActions } from './WeeklyView';
+import { WeightChart, WeightEditor, WeightView } from './WeightViews';
+import { setWeight, WEIGHT_TIME, weightHistory, weightOn } from './weight';
+import { ClassEditor, classTitle, DayClasses, ReviewClassList, STATE_TAG } from './ClassViews';
+import { CLASS_STATE_COLOR, classMarkFor, classState, nextClassState, reviewClasses, setClassMark } from './classes';
+import type { ClassMark, ClassStatus } from './types';
+import type { DayClass } from './timetable';
+import { activeGoals, addMark, autoPlanWeek, replanWeek, deleteGoal as deleteGoalItem, GOAL_REMINDER_TIME, markDuration, marksOn, mergeItems, moveMark, removeMark, saveGoal as saveGoalItem, setMarkDone, timedMarksOn } from './weekly';
+import type { GoalMark } from './types';
+import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from './journal';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from './ai-token';
 import type { AiTokenInfo } from './ai-token';
 import { readSaved, writeSaved, scheduleNative, enableNotifications, reminderQueue, isNative, MULTI_REMINDER_LEADS, leadLabel } from './platform';
@@ -25,11 +39,19 @@ const dateLabel=(key:string)=>new Intl.DateTimeFormat('zh-CN',{month:'long',day:
 const BAKED:Record<string,string>={'shiri-cloud-url':(import.meta.env.VITE_SUPABASE_URL as string|undefined)?.trim()||'','shiri-cloud-key':(import.meta.env.VITE_SUPABASE_KEY as string|undefined)?.trim()||''};
 const getPref=(key:string,fallback:string)=>{try{return localStorage.getItem(key)??(BAKED[key]||fallback);}catch{return BAKED[key]||fallback;}};
 const timeMinutes=(time:string)=>Number(time.slice(0,2))*60+Number(time.slice(3));
-// 'multi' = 提前 2 小时、1 小时、30 分钟、10 分钟各提醒一次（默认）；数字 = 只提醒一次。
-const REMINDER_OPTIONS=['multi','0','5','10','15','30','60'];
+// 'multi' = 提前 2 小时、1 小时、10 分钟各提醒一次（默认）；数字 = 只提醒一次。
+const REMINDER_OPTIONS=['multi','0','5','10','15','60'];
 const reminderLeadPref=()=>{const value=getPref('shiri-reminder-leads','multi');return REMINDER_OPTIONS.includes(value)?value:'multi';};
 const reminderLeads=(value:string)=>value==='multi'?MULTI_REMINDER_LEADS:[Number(value)];
 const germanStatePref=()=>{const value=getPref('shiri-de-state','BW');return (GERMAN_STATES.some(([code])=>code===value)?value:'') as GermanState;};
+// 桌面日历点日记标记时写入，管理窗口读到后打开那天的日记。
+const OPEN_JOURNAL_KEY='shiri-open-journal';
+// 桌面版多窗口：只有一个窗口负责同步，其他窗口用这两个键请求同步、读同步状态。
+const SYNC_REQUEST_KEY='shiri-sync-request';
+const SYNC_STATE_KEY='shiri-sync-state';
+const requestLeaderSync=()=>{try{localStorage.setItem(SYNC_REQUEST_KEY,String(Date.now()));}catch{/* ignore */}};
+// 日期格时间轴上的位置（0–1）换回一天中的分钟，和 timetable.ts dayFraction 相反。
+const fractionMinutes=(fraction:number)=>{const slot=fraction*16;return slot<1?slot*360:slot<15?360+(slot-1)*60:1200+(slot-15)*240;};
 const minutesTime=(mins:number)=>`${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
 
 function App() {
@@ -43,7 +65,29 @@ function App() {
     return { taskId: params.get('taskId') || '', date: params.get('date') || '', time: params.get('time') || '' };
   });
   const editorSurface = editorIntent !== null || cellEditorSurface;
-  const [previewSpan,setPreviewSpan] = useState<DesktopSettings['widgetSpan']>('twoWeeks');
+  // 专属日记窗口（#journal?date=…），桌面日历上双击日记标记打开。
+  const [journalSurface] = useState(() => window.location.hash.startsWith('#journal'));
+  // 快速记复盘的小窗口（#review-quick）。
+  const [reviewQuickSurface] = useState(() => window.location.hash==='#review-quick');
+  // 一节课的小窗口（#class?slot=…&date=…）。
+  const [classSurface] = useState(() => {const hash=window.location.hash;if(!hash.startsWith('#class?'))return null;const params=new URLSearchParams(hash.slice(7));const slot=params.get('slot')||'',date=params.get('date')||'';return /^[A-Za-z0-9_-]{1,64}$/.test(slot)&&/^\d{4}-\d{2}-\d{2}$/.test(date)?{slot,date}:null;});
+  const [classEdit,setClassEdit]=useState<{slot:DayClass;date:string}|null>(null);
+  // 填体重的小窗口（#weight?date=…）和管理窗口里的弹窗。
+  const [weightSurface] = useState(() => {const match=/^#weight\?date=(\d{4}-\d{2}-\d{2})$/.exec(window.location.hash);return match?match[1]:null;});
+  const [weightEdit,setWeightEdit]=useState<string|null>(null);
+  const [weightReminder,setWeightReminder]=useState(()=>getPref('shiri-weight-reminder','1')!=='0');
+  // 完成的日程放到当天最下面、不显示时间（设置里可关）。
+  const [doneBottom,setDoneBottom]=useState(()=>getPref('shiri-done-bottom','1')!=='0');
+  const classClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [quickReview,setQuickReview]=useState('');
+  const quickReviewRef=useRef<HTMLTextAreaElement>(null);
+  const [journalDate,setJournalDate]=useState(()=>{const match=/date=(\d{4}-\d{2}-\d{2})/.exec(window.location.hash);try{return match?(parseDate(match[1]),match[1]):todayKey();}catch{return todayKey();}});
+  const [journalCount,setJournalCount]=useState(0);
+  const [journalSaved,setJournalSaved]=useState('');
+  const journalFlush=useRef<()=>void>(()=>{});
+  const [previewSpan,setPreviewSpan] = useState<DesktopSettings['widgetSpan']>('focus');
+  // 7 天视图从哪天开始（默认今天，左右翻一次 7 天）。
+  const [focusStart,setFocusStart]=useState<string|null>(null);
   const [today,setToday]=useState(todayKey);
   const [selected,setSelected]=useState(todayKey);
   const [month,setMonth]=useState(()=>parseDate(todayKey()));
@@ -76,6 +120,7 @@ function App() {
   const skipCalendarClick=useRef(false);
   const desktopClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const eventClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const journalClickTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const [quick,setQuick]=useState('');
   const [reminders,setReminders]=useState(()=>getPref('shiri-reminders',window.desktop?'true':'false')==='true');
   const [reminderLead,setReminderLead]=useState(reminderLeadPref);
@@ -94,6 +139,11 @@ function App() {
   const [cloudConfigured,setCloudConfigured]=useState(false);
   const [syncRetry,setSyncRetry]=useState(0);
   const [loadedKey,setLoadedKey]=useState('');
+  const [journalFocus,setJournalFocus]=useState(0);
+  const [journalReminder,setJournalReminder]=useState(()=>getPref('shiri-journal-reminder','1')!=='0');
+  const [reviewReminder,setReviewReminder]=useState(()=>getPref('shiri-review-reminder','1')!=='0');
+  const [goalReminder,setGoalReminder]=useState(()=>getPref('shiri-goal-reminder','1')!=='0');
+  const [reviewMode,setReviewMode]=useState<'day'|'week'|'month'>('day');
   const monthGridRef=useRef<HTMLDivElement>(null);
   const importRef=useRef<HTMLInputElement>(null);
   const timelineRef=useRef<HTMLDivElement>(null);
@@ -107,7 +157,7 @@ function App() {
   const canEdit=()=>readyRef.current&&loadedKeyRef.current===keyRef.current;
   const toast=useCallback((text:string)=>setMessage(text),[]);
 
-  useEffect(()=>{document.documentElement.classList.toggle('desktop-surface',desktopSurface);document.documentElement.classList.toggle('widget-preview',desktopSurface&&!window.desktop);document.documentElement.classList.toggle('editor-surface',editorSurface);return()=>{document.documentElement.classList.remove('desktop-surface','widget-preview','editor-surface');};},[desktopSurface,editorSurface]);
+  useEffect(()=>{document.documentElement.classList.toggle('desktop-surface',desktopSurface);document.documentElement.classList.toggle('widget-preview',desktopSurface&&!window.desktop);document.documentElement.classList.toggle('editor-surface',editorSurface);document.documentElement.classList.toggle('journal-surface',journalSurface||reviewQuickSurface||!!classSurface||!!weightSurface);return()=>{document.documentElement.classList.remove('desktop-surface','widget-preview','editor-surface','journal-surface');};},[desktopSurface,editorSurface,journalSurface]);
   useEffect(()=>{
     const receive=(event:StorageEvent)=>{
       if(event.storageArea!==localStorage)return;
@@ -118,6 +168,14 @@ function App() {
       if(event.key==='shiri-reminder-leads')setReminderLead(reminderLeadPref());
       if(event.key==='shiri-de-state')setGermanState(germanStatePref());
       if(event.key==='shiri-timetable')setShowTimetable(event.newValue!=='0');
+      if(event.key==='shiri-journal-reminder')setJournalReminder(event.newValue!=='0');
+      if(event.key==='shiri-review-reminder')setReviewReminder(event.newValue!=='0');
+      if(event.key==='shiri-goal-reminder')setGoalReminder(event.newValue!=='0');
+      if(event.key==='shiri-weight-reminder')setWeightReminder(event.newValue!=='0');
+      if(event.key==='shiri-done-bottom')setDoneBottom(event.newValue!=='0');
+      if(event.key===OPEN_JOURNAL_KEY&&event.newValue&&!window.location.hash)openJournalRequest(event.newValue);
+      if(event.key===SYNC_REQUEST_KEY&&syncLeaderRef.current)setSyncRetry(n=>n+1);
+      if(event.key===SYNC_STATE_KEY&&event.newValue)setSharedSyncState(event.newValue);
       if(event.key==='shiri-cloud-key'){
         const url=getPref('shiri-cloud-url',''),key=getPref('shiri-cloud-key','');
         setCloudUrl(url);setCloudKey(key);
@@ -128,6 +186,10 @@ function App() {
   },[toast]);
 
   useEffect(()=>{const t=setInterval(()=>setToday(todayKey()),30000);return()=>clearInterval(t);},[]);
+  useEffect(()=>{if(!journalSurface)return;document.title='昱时 · 日记';const off=window.desktop?.onJournalOpen?.(date=>{try{parseDate(date);journalFlush.current();setJournalDate(date);}catch{/* ignore */}});const leave=()=>journalFlush.current();window.addEventListener('pagehide',leave);window.addEventListener('beforeunload',leave);return()=>{off?.();window.removeEventListener('pagehide',leave);window.removeEventListener('beforeunload',leave);};},[journalSurface]);
+  useEffect(()=>{if(!reviewQuickSurface)return;document.title='昱时 · 记一条复盘';const focus=()=>requestAnimationFrame(()=>quickReviewRef.current?.focus());focus();const off=window.desktop?.onReviewQuickOpen?.(focus);window.addEventListener('focus',focus);return()=>{off?.();window.removeEventListener('focus',focus);};},[reviewQuickSurface]);
+  // 管理窗口刚打开时，接上桌面日历点开日记的请求。
+  useEffect(()=>{if(window.location.hash)return;try{const raw=localStorage.getItem(OPEN_JOURNAL_KEY);if(raw)openJournalRequest(raw);}catch{/* ignore */}},[]);
   
   useEffect(()=>{if(!message)return;const t=setTimeout(()=>setMessage(''),5500);return()=>clearTimeout(t);},[message]);
   useEffect(()=>{
@@ -154,7 +216,7 @@ function App() {
     if(!desktopSurface||!window.desktop||desktop?.mode!=='desktop')return;
     const bridge=window.desktop;
     let interactive=false, dragging=false, forwardingContext=false, lastSync=0;
-    const sync=(next:boolean)=>{interactive=next;lastSync=performance.now();void bridge.setCalendarInteractive(next);};
+    const sync=(next:boolean)=>{interactive=next;lastSync=performance.now();if(!next)window.dispatchEvent(new Event('shiri-hide-tip'));void bridge.setCalendarInteractive(next);};
     const reset=()=>{dragging=false;sync(false);};
     const move=(event:MouseEvent)=>{
       if(forwardingContext)return;
@@ -187,11 +249,41 @@ function App() {
     window.addEventListener('blur',reset);
     return()=>{document.removeEventListener('mousemove',move,true);document.removeEventListener('pointerdown',down,true);document.removeEventListener('pointerup',up,true);document.removeEventListener('contextmenu',context,true);window.removeEventListener('blur',reset);offPointerReset?.();reset();};
   },[desktopSurface,desktop?.mode,!!edit]);
+  // 桌面日历不用系统自带的悬停提示：鼠标穿到桌面上后窗口收不到“离开”，系统提示会一直挂着。
+  // 改成自己画的提示，离开日程、鼠标出日历、窗口失焦、几秒不动都会收起。
+  useEffect(()=>{
+    if(!desktopSurface)return;
+    const tip=document.createElement('div');tip.className='desktop-tip';tip.hidden=true;document.body.appendChild(tip);
+    let owner:HTMLElement|null=null,showTimer:ReturnType<typeof setTimeout>|undefined,hideTimer:ReturnType<typeof setTimeout>|undefined;
+    // 页面里一出现 title 就改成 data-tip，系统提示根本不会出现。
+    const strip=(element:Element)=>{const value=element.getAttribute('title');if(value!==null){(element as HTMLElement).dataset.tip=value;element.removeAttribute('title');if(element===owner&&!tip.hidden)tip.textContent=value;}};
+    document.querySelectorAll('[title]').forEach(strip);
+    const observer=new MutationObserver(records=>{for(const record of records){if(record.type==='attributes')strip(record.target as Element);else record.addedNodes.forEach(node=>{if(node instanceof Element){strip(node);node.querySelectorAll('[title]').forEach(strip);}});}});
+    observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title']});
+    const hide=()=>{clearTimeout(showTimer);clearTimeout(hideTimer);owner=null;tip.hidden=true;};
+    const over=(event:MouseEvent)=>{
+      const element=(event.target as Element|null)?.closest<HTMLElement>('[title],[data-tip]');
+      if(element?.hasAttribute('title'))strip(element);
+      if(!element||!element.dataset.tip){hide();return;}
+      if(element===owner)return;
+      hide();owner=element;
+      showTimer=setTimeout(()=>{if(owner!==element||!element.isConnected)return;tip.textContent=element.dataset.tip||'';tip.hidden=false;const r=element.getBoundingClientRect();const w=tip.offsetWidth,h=tip.offsetHeight;tip.style.left=`${Math.max(4,Math.min(window.innerWidth-w-4,r.left))}px`;tip.style.top=`${r.bottom+6+h>window.innerHeight?r.top-h-6:r.bottom+6}px`;},450);
+    };
+    const move=()=>{clearTimeout(hideTimer);hideTimer=setTimeout(hide,5000);};
+    const leave=(event:MouseEvent)=>{if(!event.relatedTarget)hide();};
+    document.addEventListener('mouseover',over,true);
+    document.addEventListener('mousemove',move,true);
+    document.addEventListener('mouseout',leave,true);
+    document.addEventListener('pointerdown',hide,true);
+    window.addEventListener('blur',hide);
+    window.addEventListener('shiri-hide-tip',hide);
+    return()=>{observer.disconnect();hide();tip.remove();document.removeEventListener('mouseover',over,true);document.removeEventListener('mousemove',move,true);document.removeEventListener('mouseout',leave,true);document.removeEventListener('pointerdown',hide,true);window.removeEventListener('blur',hide);window.removeEventListener('shiri-hide-tip',hide);};
+  },[desktopSurface]);
   useEffect(()=>()=>{if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);if(eventClickTimer.current)clearTimeout(eventClickTimer.current);},[]);
   useEffect(()=>{
-    if(!ready||loadedKey!==storageKey)return; const timer=setTimeout(()=>scheduleNative(data.tasks,reminders,reminderLeads(reminderLead)).catch(()=>toast('提醒计划未能更新，请检查通知权限')),800);
+    if(!ready||loadedKey!==storageKey)return; const timer=setTimeout(()=>scheduleNative(data.tasks,reminders,reminderLeads(reminderLead),journalReminder?data.journal??[]:null,reviewReminder?data.reflections??[]:null,goalReminder?{goals:data.goals,marks:data.goalMarks}:null,weightReminder?data.weights??[]:null).catch(()=>toast('提醒计划未能更新，请检查通知权限')),800);
     return()=>clearTimeout(timer);
-  },[data.tasks,reminders,reminderLead,ready,loadedKey,storageKey,today,toast]);
+  },[data.tasks,data.journal,data.reflections,data.goals,data.goalMarks,data.weights,journalReminder,reviewReminder,goalReminder,weightReminder,reminders,reminderLead,ready,loadedKey,storageKey,today,toast]);
   useEffect(()=>{
     if(!reminders||window.desktop||isNative)return;
     let due=reminderQueue(data.tasks,30,Date.now(),reminderLeads(reminderLead)); const timer=setInterval(()=>{
@@ -211,9 +303,34 @@ function App() {
     const savedUrl=getPref('shiri-cloud-url',''),savedKey=getPref('shiri-cloud-key','');
     if(savedUrl&&savedKey)try{setClient(createCloudClient(savedUrl,savedKey));setCloudConfigured(true);}catch{toast('云同步配置无效，请在设置中更新');}
   },[toast]);
+  // 桌面版同时开着好几个窗口（桌面日历、管理窗口、一直待命的格内编辑器、日记 / 复盘 / 课程 / 体重小窗），
+  // 以前每个窗口都各自同步、各自订阅云端变化、各自每 45 秒拉一遍全部数据，改一条日程会触发好几轮同步，桌面因此发卡。
+  // 现在只让一个窗口负责同步（用浏览器的 Web Locks 选出来；它关掉后另一个窗口自动接手），其他窗口经本机存储拿到结果。
+  // 小窗口和格内编辑器从不负责同步。iPhone 网页版和浏览器预览只有一个窗口，照旧自己同步。
+  const syncSurface=!editorSurface&&!journalSurface&&!reviewQuickSurface&&!classSurface&&!weightSurface;
+  const [syncLeader,setSyncLeader]=useState(()=>!window.desktop);
+  const syncLeaderRef=useRef(syncLeader); syncLeaderRef.current=syncLeader;
+  const [sharedSyncState,setSharedSyncState]=useState(()=>getPref(SYNC_STATE_KEY,''));
+  // 不负责同步的窗口显示负责同步的那个窗口的状态。
+  const syncLabel=window.desktop&&!syncLeader&&sharedSyncState?sharedSyncState:syncState;
+  useEffect(()=>{
+    if(!window.desktop||!syncSurface)return;
+    const locks=(navigator as Navigator&{locks?:LockManager}).locks;
+    if(!locks?.request){setSyncLeader(true);return;}
+    const controller=new AbortController();let release=()=>{};
+    locks.request('shiri-sync-leader',{signal:controller.signal},()=>new Promise<void>(resolve=>{release=resolve;setSyncLeader(true);})).catch(()=>{/* 窗口关闭时放弃排队 */});
+    return()=>{controller.abort();release();setSyncLeader(false);};
+  },[syncSurface]);
+  // 负责同步的窗口把同步状态写进本机存储，管理窗口的“已同步 / 同步失败”跟着显示。
+  useEffect(()=>{if(window.desktop&&syncLeader)try{localStorage.setItem(SYNC_STATE_KEY,syncState);}catch{/* ignore */}},[syncLeader,syncState]);
   const syncing=useRef(false);
+  const syncAgain=useRef(false);
+  // 自动排周次任务要等第一次同步完，免得和另一台设备上改过的格子打架。
+  const syncedOnce=useRef(false);
   const runSync=useCallback(async()=>{
-    if(!client||!user||!readyRef.current||syncing.current)return;
+    if(!client||!user||!readyRef.current||!syncLeaderRef.current)return;
+    // 同步进行中又改了东西：记下来，这一轮结束马上再同步一次（以前要等 45 秒的定时同步）。
+    if(syncing.current){syncAgain.current=true;return;}
     const owner=user.id, expectedKey=accountKey(owner);
     if(keyRef.current!==expectedKey||loadedKeyRef.current!==expectedKey)return;
     syncing.current=true;setSyncState('正在同步');
@@ -223,14 +340,21 @@ function App() {
         if(canonical&&uidRef.current===owner&&keyRef.current===expectedKey)setData(prev=>{const lists=listsForTasks(prev.tasks,applyRemoteLists(prev.lists,canonical));return JSON.stringify(lists)===JSON.stringify(prev.lists)?prev:{...prev,lists};});
         const syncedTimetable=await syncTimetable(client,owner,dataRef.current.timetable);
         if(syncedTimetable&&uidRef.current===owner&&keyRef.current===expectedKey)setData(prev=>prev.timetable&&prev.timetable.updatedAt>syncedTimetable.updatedAt||JSON.stringify(prev.timetable)===JSON.stringify(syncedTimetable)?prev:{...prev,timetable:syncedTimetable});
-        setSyncState('已同步');}
+        const syncedJournal=await syncJournal(client,owner,dataRef.current.journal);
+        if(syncedJournal&&uidRef.current===owner&&keyRef.current===expectedKey)setData(prev=>{const journal=mergeJournal(prev.journal,syncedJournal);return JSON.stringify(journal)===JSON.stringify(prev.journal??[])?prev:{...prev,journal};});
+        const syncedReflections=await syncReflections(client,owner,dataRef.current.reflections);
+        if(syncedReflections&&uidRef.current===owner&&keyRef.current===expectedKey)setData(prev=>{const reflections=mergeReflections(prev.reflections,syncedReflections);return JSON.stringify(reflections)===JSON.stringify(mergeReflections(prev.reflections))?prev:{...prev,reflections};});
+        const syncedWeekly=await syncWeekly(client,owner,dataRef.current.goals,dataRef.current.goalMarks,dataRef.current.classMarks,dataRef.current.weights);
+        if(syncedWeekly&&uidRef.current===owner&&keyRef.current===expectedKey)setData(prev=>{const goals=mergeItems(prev.goals,syncedWeekly.goals),goalMarks=mergeItems(prev.goalMarks,syncedWeekly.marks),classMarks=mergeItems(prev.classMarks,syncedWeekly.classMarks),weights=mergeItems(prev.weights,syncedWeekly.weights);return JSON.stringify(goals)===JSON.stringify(mergeItems(prev.goals))&&JSON.stringify(goalMarks)===JSON.stringify(mergeItems(prev.goalMarks))&&JSON.stringify(classMarks)===JSON.stringify(mergeItems(prev.classMarks))&&JSON.stringify(weights)===JSON.stringify(mergeItems(prev.weights))?prev:{...prev,goals,goalMarks,classMarks,weights};});
+        syncedOnce.current=true;setSyncState('已同步');}
     }catch(e){if(uidRef.current===owner)setSyncState(navigator.onLine?'同步失败，已保存在本机':'离线 · 已保存在本机');}
-    finally{syncing.current=false;}
+    finally{syncing.current=false;if(syncAgain.current){syncAgain.current=false;setSyncRetry(n=>n+1);}}
   },[client,user,accountKey]);
-  useEffect(()=>{if(!user||!ready||loadedKey!==storageKey)return;const t=setTimeout(()=>void runSync(),1800);return()=>clearTimeout(t);},[data.tasks,data.lists,data.timetable,ready,loadedKey,storageKey,runSync,syncRetry,user]);
+  useEffect(()=>{if(!user||!ready||loadedKey!==storageKey||!syncLeader)return;const t=setTimeout(()=>void runSync(),1800);return()=>clearTimeout(t);},[data.tasks,data.lists,data.timetable,data.journal,data.reflections,data.goals,data.goalMarks,data.classMarks,data.weights,ready,loadedKey,storageKey,runSync,syncRetry,user,syncLeader]);
   // 手机上的改动几秒内推到电脑：云端有变更就立刻同步一次。
-  useEffect(()=>{if(!client||!user)return;let t:ReturnType<typeof setTimeout>|undefined;const stop=subscribeLive(client,user.id,()=>{clearTimeout(t);t=setTimeout(()=>setSyncRetry(n=>n+1),350);});return()=>{clearTimeout(t);stop();};},[client,user]);
-  useEffect(()=>{if(!user)return;const sync=()=>setSyncRetry(n=>n+1);const t=setInterval(sync,45000);window.addEventListener('online',sync);window.addEventListener('focus',sync);return()=>{clearInterval(t);window.removeEventListener('online',sync);window.removeEventListener('focus',sync);};},[user]);
+  useEffect(()=>{if(!client||!user||!syncLeader)return;let t:ReturnType<typeof setTimeout>|undefined;const stop=subscribeLive(client,user.id,()=>{clearTimeout(t);t=setTimeout(()=>setSyncRetry(n=>n+1),350);});return()=>{clearTimeout(t);stop();};},[client,user,syncLeader]);
+  // 不负责同步的窗口（例如管理窗口）获得焦点或点“立即同步”时，请负责同步的窗口同步一次。
+  useEffect(()=>{if(!user||!syncSurface)return;const sync=()=>{if(syncLeaderRef.current)setSyncRetry(n=>n+1);else requestLeaderSync();};const t=setInterval(()=>{if(syncLeaderRef.current)setSyncRetry(n=>n+1);},45000);window.addEventListener('online',sync);window.addEventListener('focus',sync);return()=>{clearInterval(t);window.removeEventListener('online',sync);window.removeEventListener('focus',sync);};},[user,syncSurface]);
   useEffect(()=>{if(view==='day'&&timelineRef.current)timelineRef.current.scrollTop=7*60;},[view,selected]);
   useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'){setEdit(null);setSettings(false);setMobileMenu(false);}if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();document.getElementById('search')?.focus();}};window.addEventListener('keydown',onKey);return()=>window.removeEventListener('keydown',onKey);},[]);
 
@@ -288,21 +412,79 @@ function App() {
   },[cellEditorSurface]);
 
   const timetable=effectiveTimetable(data.timetable);
+  // 自动排周次任务时要避开的时间：课程和带时间的日程。
+  const busyOf=(snapshot:AppData)=>{const active=snapshot.tasks.filter(t=>!t.deletedAt);const table=effectiveTimetable(snapshot.timetable);return (date:string):[number,number][]=>[
+    ...(classesForDate(table,date,!!germanHoliday(date,germanState))??[]).flatMap(row=>row.slots).map(slot=>[timeMinutes(slot.start),timeMinutes(slot.end)] as [number,number]),
+    ...tasksForDate(active,date).filter(t=>t.time).map(t=>[timeMinutes(t.time),timeMinutes(t.time)+t.duration] as [number,number]),
+  ];};
+  useEffect(()=>{
+    if(!ready||loadedKey!==storageKey||editorSurface||journalSurface||reviewQuickSurface||classSurface||weightSurface)return;
+    if(user&&!syncedOnce.current)return;
+    if(!activeGoals(data.goals).length)return;
+    const added=autoPlanWeek(data.goals,data.goalMarks,today,Date.now(),busyOf(data));
+    if(added.length)setData(prev=>({...prev,goalMarks:mergeItems(prev.goalMarks,added)}));
+  },[data.goals,data.goalMarks,data.tasks,today,ready,loadedKey,storageKey,user,syncState,timetable,germanState]);
   function setTimetableVisible(visible:boolean){setShowTimetable(visible);try{localStorage.setItem('shiri-timetable',visible?'1':'0');}catch{toast('课表显示设置未能保存');}}
   // Only valid timetables are stored, so a half-typed edit can never make the saved data unreadable.
   function saveTimetable(next:Timetable){if(!canEdit()){toast('数据还未载入，暂时无法编辑');return;}const candidate={...next,updatedAt:stamp()};try{validateTimetable(candidate);}catch(e){toast((e as Error).message);return;}setData(prev=>({...prev,timetable:candidate}));}
   function updateSlot(id:string,patch:Partial<TimetableSlot>){saveTimetable({...timetable,slots:timetable.slots.map(slot=>slot.id===id?{...slot,...patch}:slot)});}
+  function saveJournal(date:string,text:string){if(!canEdit()){toast('数据还未载入，日记暂时无法保存');return;}setData(prev=>{const journal=writeJournal(prev.journal,date,text);return journal===prev.journal||(!prev.journal&&!journal.length)?prev:{...prev,journal};});}
+  // 小窗口里记一条：先直接写进本机存储（随后马上关窗口也不丢），再更新界面。
+  function addReviewNow(text:string){if(!canEdit()||!text.trim())return;const id=uid();try{const raw=localStorage.getItem(keyRef.current);if(raw){const stored=validateBackup(JSON.parse(raw));localStorage.setItem(keyRef.current,JSON.stringify({...stored,reflections:addReflection(stored.reflections,today,text,id)}));}}catch{/* 下面的正常保存兜底 */}setData(prev=>{if(prev.reflections?.some(item=>item.id===id))return prev;const reflections=addReflection(prev.reflections,today,text,id);return reflections===prev.reflections?prev:{...prev,reflections};});}
+  // 记一节课的状态；小窗口里先直接写进本机存储，保存后马上关窗也不丢。
+  function setClassStatus(slot:{id:string;title:string},date:string,status:ClassStatus,note?:string){
+    if(!canEdit())return;
+    const now=Date.now();
+    if(classSurface){try{const raw=localStorage.getItem(keyRef.current);if(raw){const stored=validateBackup(JSON.parse(raw));localStorage.setItem(keyRef.current,JSON.stringify({...stored,classMarks:setClassMark(stored.classMarks,slot,date,status,note,now)}));}}catch{/* 下面的正常保存兜底 */}}
+    setData(prev=>{const classMarks=setClassMark(prev.classMarks,slot,date,status,note,now);return classMarks===prev.classMarks?prev:{...prev,classMarks};});
+  }
+  // 记体重；小窗口里先直接写进本机存储，保存后马上关窗也不丢。
+  function saveWeight(date:string,kg:number|null){
+    if(!canEdit())return;
+    const now=Date.now();
+    if(weightSurface){try{const raw=localStorage.getItem(keyRef.current);if(raw){const stored=validateBackup(JSON.parse(raw));localStorage.setItem(keyRef.current,JSON.stringify({...stored,weights:setWeight(stored.weights,date,kg,now)}));}}catch{/* 下面的正常保存兜底 */}}
+    setData(prev=>{const weights=setWeight(prev.weights,date,kg,now);return weights===prev.weights?prev:{...prev,weights};});
+  }
+  function openWeight(date:string){if(desktopSurface&&window.desktop?.openWeightEditor){void window.desktop.openWeightEditor(date).then(result=>{if(!result.ok)toast(result.error||'体重窗口打不开');});return;}setWeightEdit(date);}
+  function openClass(slot:DayClass,date:string){if(desktopSurface&&window.desktop?.openClassEditor){void window.desktop.openClassEditor({slotId:slot.id,date}).then(result=>{if(!result.ok)toast(result.error||'课程窗口打不开');});return;}setClassEdit({slot,date});}
+  function openClassMark(mark:ClassMark){const slot=timetable.slots.find(item=>item.id===mark.slotId);setClassEdit({slot:slot?{...slot}:{id:mark.slotId,day:1,start:'',end:'',title:mark.title,note:'',color:CLASS_COLOR,dashed:false},date:mark.date});}
+  const weeklyActions:WeeklyActions={
+    // 改了时间设置就按新设置重排本周剩下的（做完的和挪过的不动）。
+    saveGoal:goal=>{if(!canEdit())return;const id=goal.id||uid();setData(prev=>{const goals=saveGoalItem(prev.goals,{...goal,id});if(goals===prev.goals)return prev;if(!goal.id)return {...prev,goals};const {removed,added}=replanWeek(goals,prev.goalMarks,today,Date.now(),busyOf({...prev,goals}),uid,id);let goalMarks=prev.goalMarks;for(const markId of removed)goalMarks=removeMark(goalMarks,markId);return {...prev,goals,goalMarks:[...(goalMarks??[]),...added]};});},
+    replan:goalId=>{if(!canEdit())return;let count=0;setData(prev=>{const {removed,added}=replanWeek(prev.goals,prev.goalMarks,today,Date.now(),busyOf(prev),uid,goalId);count=added.length;if(!removed.length&&!added.length)return prev;let goalMarks=prev.goalMarks;for(const markId of removed)goalMarks=removeMark(goalMarks,markId);return {...prev,goalMarks:[...(goalMarks??[]),...added]};});setTimeout(()=>toast(count?'已按现在的设置重新排好本周剩下的安排':'本周没有可以重排的安排（做完的和挪过的不会动）'),0);},
+    openSettings:()=>{if(desktopSurface&&window.desktop){try{localStorage.setItem(OPEN_JOURNAL_KEY,JSON.stringify({date:today,at:Date.now(),journal:false,section:'weekly'}));}catch{/* ignore */}void window.desktop.showWindow();return;}setSection('weekly');},
+    deleteGoal:id=>{if(!canEdit())return;setData(prev=>({...prev,goals:deleteGoalItem(prev.goals,id)}));},
+    addMark:(goalId,date,done,time)=>{if(!canEdit())return;const id=uid();setData(prev=>({...prev,goalMarks:addMark(prev.goalMarks,goalId,date,done,id,Date.now(),time)}));},
+    moveMark:(id,date,time)=>{if(!canEdit())return;setData(prev=>({...prev,goalMarks:moveMark(prev.goalMarks,id,date,time)}));},
+    setMarkDone:(id,done)=>{if(!canEdit())return;setData(prev=>({...prev,goalMarks:setMarkDone(prev.goalMarks,id,done)}));},
+    removeMark:id=>{if(!canEdit())return;setData(prev=>({...prev,goalMarks:removeMark(prev.goalMarks,id)}));},
+  };
+  function addReview(date:string,text:string){if(!canEdit()){toast('数据还未载入，暂时无法记录');return;}const id=uid();setData(prev=>{const reflections=addReflection(prev.reflections,date,text,id);return reflections===prev.reflections?prev:{...prev,reflections};});}
+  function editReview(id:string,text:string){if(!canEdit())return;setData(prev=>{const reflections=editReflection(prev.reflections,id,text);return reflections===prev.reflections?prev:{...prev,reflections};});}
+  function saveJournalNow(date:string,text:string){
+    if(!canEdit())return;
+    // 先直接写进本机存储（关窗口时 React 来不及再渲染），再更新界面。
+    try{const raw=localStorage.getItem(keyRef.current);if(raw){const stored=validateBackup(JSON.parse(raw));const journal=writeJournal(stored.journal,date,text);if(journal!==stored.journal)localStorage.setItem(keyRef.current,JSON.stringify({...stored,journal}));}}catch{/* 下面的正常保存兜底 */}
+    saveJournal(date,text);setJournalSaved(new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}));
+  }
+  // 打开专属日记窗口；浏览器预览里没有桌面服务时退回右栏。
+  function openJournalWindow(date:string){if(window.desktop?.openJournalWindow){void window.desktop.openJournalWindow(date).then(result=>{if(!result.ok)toast(result.error||'日记窗口打不开');});return;}openJournal(date);}
+  function openJournalRequest(raw:string){try{const {date,at,journal,section:target}=JSON.parse(raw) as {date:string;at:number;journal?:boolean;section?:string};if(Date.now()-at>15000)return;parseDate(date);setSelected(date);setMonth(parseDate(date));setSection(target==='weekly'?'weekly':'calendar');setPanel(true);setMobileMenu(false);if(journal!==false)setJournalFocus(n=>n+1);}catch{/* ignore */}}
+  // 桌面日历上只显示是否写了，日记内容在管理窗口里看和写。
+  function openJournal(date:string,focusJournal=true){if(desktopSurface&&window.desktop){try{localStorage.setItem(OPEN_JOURNAL_KEY,JSON.stringify({date,at:Date.now(),journal:focusJournal}));}catch{/* ignore */}void window.desktop.showWindow();return;}selectDate(date);setSection('calendar');setPanel(true);if(focusJournal)setJournalFocus(n=>n+1);}
   const listOf=(id:string)=>data.lists.find(l=>l.id===id)??data.lists[0];
   const activeTasks=data.tasks.filter(t=>!t.deletedAt);
   const filtered=activeTasks.filter(t=>(filter==='all'||t.listId===filter)&&(!query||`${t.title} ${t.notes}`.toLowerCase().includes(query.toLowerCase())));
   const onDate=(key:string)=>tasksForDate(filtered,key).filter(t=>!hideDone||!isDone(t,key));
-  const dayTasks=onDate(selected);
+  const dayTasks=doneBottom?doneLast(onDate(selected),selected):onDate(selected);
   const todayTasks=tasksForDate(activeTasks,today);
   const completedToday=todayTasks.filter(t=>isDone(t,today)).length;
   const inbox=filtered.filter(t=>!t.date&&(!hideDone||!t.completed));
   const widgetSpan=desktop?.widgetSpan??previewSpan;
   const weekStart=addDays(selected,-((parseDate(selected).getDay()+6)%7));
-  const days=desktopSurface&&widgetSpan!=='month'
+  const days=desktopSurface&&widgetSpan==='focus'
+    ?Array.from({length:7},(_,index)=>addDays(addDays(focusStart??today,-((parseDate(focusStart??today).getDay()+6)%7)),index))
+    :desktopSurface&&widgetSpan!=='month'
     ?Array.from({length:widgetSpan==='week'?7:14},(_,index)=>addDays(weekStart,index))
     :monthDays(month.getFullYear(),month.getMonth());
   const rangeStart=parseDate(days[0]);
@@ -344,11 +526,12 @@ function App() {
   }
   function complete(task:Task,date=task.date||selected){updateTask(toggleTask(task,date));}
   function selectDate(date:string){setSelected(date);if(date.slice(0,7)!==dateKey(month).slice(0,7))setMonth(parseDate(date));setPanel(true);}
-  function goToday(){setSelected(today);setMonth(parseDate(today));setSection('calendar');setFilter('all');}
-  function navigate(delta:number){if(desktopSurface&&widgetSpan!=='month'){selectDate(addDays(selected,delta*(widgetSpan==='week'?7:14)));}else if(view==='day'&&!desktopSurface){const next=addDays(selected,delta);selectDate(next);}else setMonth(new Date(month.getFullYear(),month.getMonth()+delta,1));}
+  function goToday(){setFocusStart(null);setSelected(today);setMonth(parseDate(today));setSection('calendar');setFilter('all');}
+  function navigate(delta:number){if(desktopSurface&&widgetSpan==='focus'){setFocusStart(addDays(focusStart??today,delta*7));return;}if(desktopSurface&&widgetSpan!=='month'){selectDate(addDays(selected,delta*(widgetSpan==='week'?7:14)));}else if(view==='day'&&!desktopSurface){const next=addDays(selected,delta);selectDate(next);}else setMonth(new Date(month.getFullYear(),month.getMonth()+delta,1));}
   function dragStart(e:DragEvent,task:Task,date:string){e.dataTransfer.setData('application/x-shiri',JSON.stringify({id:task.id,date}));e.dataTransfer.effectAllowed='move';}
   function calendarPointerDown(e:React.PointerEvent<HTMLButtonElement>){if(e.button!==0)return;calendarDrag.current={x:e.clientX,y:e.clientY,moved:false};skipCalendarClick.current=false;e.currentTarget.setPointerCapture(e.pointerId);}
   function calendarPointerMove(e:React.PointerEvent<HTMLButtonElement>){const drag=calendarDrag.current;if(drag&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>8){drag.moved=true;e.currentTarget.style.opacity='.45';}}
+  function goalPointerUp(e:React.PointerEvent<HTMLButtonElement>,mark:GoalMark){const drag=calendarDrag.current;calendarDrag.current=null;e.currentTarget.style.opacity='';if(!drag?.moved)return;skipCalendarClick.current=true;e.currentTarget.style.pointerEvents='none';const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest<HTMLElement>('[data-date]');e.currentTarget.style.pointerEvents='';const target=cell?.dataset.date;if(!target)return;const hours=cell!.querySelector<HTMLElement>('.cell-hours');let time=mark.time;if(hours){const r=hours.getBoundingClientRect();const fraction=(e.clientY-r.top)/r.height;if(fraction>=0&&fraction<=1){const minutes=Math.round(fractionMinutes(fraction)/15)*15;time=minutesTime(Math.min(23*60+45,Math.max(0,minutes)));}}if(target!==mark.date||time!==mark.time){weeklyActions.moveMark(mark.id,target,time);toast(`已改到 ${target.slice(5).replace('-','/')} ${time??''}`);}}
   function calendarPointerUp(e:React.PointerEvent<HTMLButtonElement>,task:Task,date:string){const drag=calendarDrag.current;calendarDrag.current=null;e.currentTarget.style.opacity='';if(!drag?.moved)return;skipCalendarClick.current=true;e.currentTarget.style.pointerEvents='none';const target=document.elementFromPoint(e.clientX,e.clientY)?.closest<HTMLElement>('[data-date]')?.dataset.date;e.currentTarget.style.pointerEvents='';if(target&&target!==date){updateTask(moveTask(task,date,target));toast(task.repeat==='none'?'已调整日程日期':'已调整整个重复系列');}}
   function drop(e:DragEvent,date:string,time?:string){
     e.preventDefault();e.currentTarget.classList.remove('dragover');
@@ -362,7 +545,7 @@ function App() {
   function deleteTask(){if(!edit)return;const original=edit;setUndo(original);updateTask({...original,deletedAt:stamp()});setEdit(null);toast('任务已删除');}
   function quickAdd(e:FormEvent){e.preventDefault();if(!quick.trim()||!canEdit())return;if(quick.trim().length>200){toast('任务名称最多 200 字');return;}const now=stamp();updateTask({id:uid(),title:quick.trim(),date:section==='inbox'?'':selected,time:'',duration:60,listId:filter==='all'?data.lists[0].id:filter,notes:'',priority:'normal',repeat:'none',completed:false,doneDates:[],createdAt:now,updatedAt:now});setQuick('');}
   function downloadBackup(){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`昱时备份-${today}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-  async function importBackup(file?:File){if(!file||!canEdit())return;const owner=keyRef.current;try{if(file.size>10_000_000)throw new Error('备份文件过大');const imported=validateBackup(JSON.parse(await file.text()));if(owner!==keyRef.current||!canEdit())return;setData(prev=>({...prev,tasks:mergeTasks(prev.tasks,imported.tasks),lists:[...prev.lists,...imported.lists.filter(l=>!prev.lists.some(p=>p.id===l.id))]}));toast('备份已合并，已有的较新任务会保留');}catch(e){toast(`导入失败：${(e as Error).message}`);}if(importRef.current)importRef.current.value='';}
+  async function importBackup(file?:File){if(!file||!canEdit())return;const owner=keyRef.current;try{if(file.size>10_000_000)throw new Error('备份文件过大');const imported=validateBackup(JSON.parse(await file.text()));if(owner!==keyRef.current||!canEdit())return;setData(prev=>({...prev,tasks:mergeTasks(prev.tasks,imported.tasks),lists:[...prev.lists,...imported.lists.filter(l=>!prev.lists.some(p=>p.id===l.id))],...(imported.journal?{journal:mergeJournal(prev.journal,imported.journal)}:{}),...(imported.reflections?{reflections:mergeReflections(prev.reflections,imported.reflections)}:{}),...(imported.goals?{goals:mergeItems(prev.goals,imported.goals)}:{}),...(imported.goalMarks?{goalMarks:mergeItems(prev.goalMarks,imported.goalMarks)}:{}),...(imported.classMarks?{classMarks:mergeItems(prev.classMarks,imported.classMarks)}:{}),...(imported.weights?{weights:mergeItems(prev.weights,imported.weights)}:{})}));toast('备份已合并，已有的较新任务会保留');}catch(e){toast(`导入失败：${(e as Error).message}`);}if(importRef.current)importRef.current.value='';}
   function loadExamples(){const now=stamp();const sample=[['项目周会','09:00',60,0],['专注时间 · 整理本周计划','11:00',90,0],['去公园走一走','18:00',45,1],['读书 20 分钟','21:00',30,2],['准备下周的旅行清单','',60,1]] as const;const tasks:Task[]=sample.map(([title,time,duration,list],i)=>({id:uid(),title,date:i===4?addDays(today,2):today,time,duration,listId:data.lists[list]?.id??data.lists[0].id,notes:'这是一条示例任务，可以编辑或删除。',priority:i===0?'high':'normal',repeat:i===3?'daily':'none',completed:false,doneDates:[],createdAt:now,updatedAt:now}));setData(prev=>({...prev,tasks:[...prev.tasks,...tasks]}));goToday();toast('已添加 5 条示例任务，你可以编辑或删除它们');}
   async function changeMode(mode:DesktopSettings['mode']){if(window.desktop){const result=await window.desktop.setMode(mode);setDesktop(result);if(!result.ok)toast(result.error||'切换失败');else if(mode==='desktop')toast('桌面日历已显示 · Ctrl+Alt+D 打开管理窗口');}else{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch{toast('请使用浏览器的全屏选项');}}}
   async function changeWidgetSpan(span:DesktopSettings['widgetSpan']){if(window.desktop){const result=await window.desktop.setWidgetSpan(span);if(result.ok)setDesktop(result);else toast(result.error||'调整日历范围失败');}else setPreviewSpan(span);}
@@ -385,15 +568,15 @@ function App() {
     if(!client)return;if(newPassword!==confirmPassword){toast('两次输入的新密码不一致。');return;}setBusy(true);
     try{await updatePassword(client,newPassword);setNewPassword('');setConfirmPassword('');setChangingPassword(false);toast('新密码已保存。账号和现有日程保持不变。');}catch(e){toast(cloudErrorMessage(e));}finally{setBusy(false);}
   }
-  async function migrateLocal(){if(!canEdit()||!user)return;const owner=keyRef.current;try{const raw=await readSaved('shiri-data:local');if(owner!==keyRef.current||!canEdit())return;if(raw){const local=validateBackup(JSON.parse(raw));setData(prev=>({...prev,tasks:mergeTasks(prev.tasks,local.tasks),lists:[...prev.lists,...local.lists.filter(l=>!prev.lists.some(p=>p.id===l.id))]}));toast('本机任务已合并到当前账号，正在等待同步');}else toast('没有本机任务可合并');}catch{toast('本机数据未能读取');}}
+  async function migrateLocal(){if(!canEdit()||!user)return;const owner=keyRef.current;try{const raw=await readSaved('shiri-data:local');if(owner!==keyRef.current||!canEdit())return;if(raw){const local=validateBackup(JSON.parse(raw));setData(prev=>({...prev,tasks:mergeTasks(prev.tasks,local.tasks),lists:[...prev.lists,...local.lists.filter(l=>!prev.lists.some(p=>p.id===l.id))],...(local.journal?{journal:mergeJournal(prev.journal,local.journal)}:{}),...(local.reflections?{reflections:mergeReflections(prev.reflections,local.reflections)}:{}),...(local.goals?{goals:mergeItems(prev.goals,local.goals)}:{}),...(local.goalMarks?{goalMarks:mergeItems(prev.goalMarks,local.goalMarks)}:{}),...(local.classMarks?{classMarks:mergeItems(prev.classMarks,local.classMarks)}:{}),...(local.weights?{weights:mergeItems(prev.weights,local.weights)}:{})}));toast('本机任务已合并到当前账号，正在等待同步');}else toast('没有本机任务可合并');}catch{toast('本机数据未能读取');}}
 
-  function taskRow(task:Task,date:string,compact=false){const done=isDone(task,date);const list=listOf(task.listId);return <div key={`${task.id}:${date}`} className={`task-row ${done?'done':''} ${compact?'compact':''}`} draggable onDragStart={e=>dragStart(e,task,date)}>
+  function taskRow(task:Task,date:string,compact=false){const done=isDone(task,date);const list=listOf(task.listId);const showTime=!!task.time&&!(doneBottom&&done);return <div key={`${task.id}:${date}`} className={`task-row ${done?'done':''} ${compact?'compact':''}`} draggable onDragStart={e=>dragStart(e,task,date)}>
     <button className={`check ${done?'checked':''}`} aria-label={`${done?'取消完成':'完成'} ${task.title}`} onClick={()=>complete(task,date)}>{done&&<Check size={12}/>}</button>
-    <button className="task-text" onClick={()=>editTask(task,date)}><span>{task.priority==='high'&&<Star className="row-star" size={11} fill="currentColor" aria-label="星标"/>}{task.title}</span><small>{task.time&&<><Clock3 size={11}/>{task.time} · </>}{list?.name}{task.repeat!=='none'&&<Repeat2 size={11}/>}</small></button>
+    <button className="task-text" onClick={()=>editTask(task,date)}><span>{task.priority==='high'&&<Star className="row-star" size={11} fill="currentColor" aria-label="星标"/>}{task.title}</span><small>{showTime&&<><Clock3 size={11}/>{task.time}–{minutesTime(Math.min(1440,timeMinutes(task.time)+task.duration))} · </>}{list?.name}{task.repeat!=='none'&&<Repeat2 size={11}/>}</small></button>
     <span className={`priority ${task.priority==='high'?'high':''}`} style={{background:task.priority==='high'?undefined:task.color||list?.color}}/>
   </div>;}
 
-  const daySchedule = <div className="day-view"><div className="all-day"><span>全天</span><div>{dayTasks.filter(t=>!t.time).map(t=>taskRow(t,selected,true))}<button className="all-day-add" onClick={()=>newTask(selected)}><Plus size={14}/>全天日程</button></div></div><div className="timeline-scroll" ref={timelineRef}><div className="timeline"><div className="time-gutter">{Array.from({length:24},(_,h)=><span key={h} style={{top:h*60}}>{String(h).padStart(2,'0')}:00</span>)}</div><div className="time-slots">{Array.from({length:48},(_,half)=><button key={half} className={`time-slot ${half%2?'half':''}`} aria-label={`${selected} ${minutesTime(half*30)} 新建日程`} onClick={()=>newTask(selected,minutesTime(half*30))} onDragOver={e=>e.preventDefault()} onDrop={e=>drop(e,selected,minutesTime(half*30))}/>)}<TimelineEvents tasks={dayTasks.filter(t=>t.time)} date={selected} color={task=>task.color||listOf(task.listId)?.color||'#6475d5'} onEdit={task=>editTask(task,selected)} onDrag={dragStart} onMove={(task,time)=>{updateTask(moveTask(task,selected,selected,time));toast(task.repeat==='none'?'已调整日程时间':'已调整整个重复系列的时间');}}/>{selected===today&&<div className="now-line" style={{top:new Date().getHours()*60+new Date().getMinutes()}}><i/></div>}</div></div></div></div>;
+  const daySchedule = <div className="day-view"><div className="all-day"><span>全天</span><div>{dayTasks.filter(t=>!t.time||(doneBottom&&isDone(t,selected))).map(t=>taskRow(t,selected,true))}<button className="all-day-add" onClick={()=>newTask(selected)}><Plus size={14}/>全天日程</button></div></div><div className="timeline-scroll" ref={timelineRef}><div className="timeline"><div className="time-gutter">{Array.from({length:24},(_,h)=><span key={h} style={{top:h*60}}>{String(h).padStart(2,'0')}:00</span>)}</div><div className="time-slots">{Array.from({length:48},(_,half)=><button key={half} className={`time-slot ${half%2?'half':''}`} aria-label={`${selected} ${minutesTime(half*30)} 新建日程`} onClick={()=>newTask(selected,minutesTime(half*30))} onDragOver={e=>e.preventDefault()} onDrop={e=>drop(e,selected,minutesTime(half*30))}/>)}<TimelineEvents tasks={dayTasks.filter(t=>t.time&&!(doneBottom&&isDone(t,selected)))} date={selected} color={task=>task.color||listOf(task.listId)?.color||'#6475d5'} onEdit={task=>editTask(task,selected)} onDrag={dragStart} onMove={(task,time)=>{updateTask(moveTask(task,selected,selected,time));toast(task.repeat==='none'?'已调整日程时间':'已调整整个重复系列的时间');}}/>{selected===today&&<div className="now-line" style={{top:new Date().getHours()*60+new Date().getMinutes()}}><i/></div>}</div></div></div></div>;
 
   const editExists=!!edit&&activeTasks.some(t=>t.id===edit.id);
   const inlineEditor=edit&&<form className={`desktop-inline-editor ${cellExpanded?'expanded':'compact'}`} onSubmit={saveTask} onClick={e=>e.stopPropagation()} onDoubleClick={e=>e.stopPropagation()} onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();setEdit(null);}}}>
@@ -405,6 +588,46 @@ function App() {
     {cellExpanded&&<><div className="inline-editor-fields"><label>日期<input type="date" aria-label="日期" value={edit.date} onChange={e=>setEdit({...edit,date:e.target.value})}/></label><label>时长<select aria-label="持续时长" disabled={!edit.time} value={edit.duration} onChange={e=>setEdit({...edit,duration:Number(e.target.value)})}>{[15,30,45,60,90,120,180,240,480].map(n=><option key={n} value={n}>{n<60?`${n} 分钟`:`${n/60} 小时`}</option>)}</select></label><label>重复<select aria-label="重复" value={edit.repeat} onChange={e=>setEdit({...edit,repeat:e.target.value as Task['repeat']})}>{Object.entries(REPEATS).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select></label><label>清单<select aria-label="所属清单" value={edit.listId} onChange={e=>setEdit({...edit,listId:e.target.value})}>{data.lists.map(list=><option key={list.id} value={list.id}>{list.name}</option>)}</select></label></div></>}
   </form>;
 
+  if(weightSurface){
+    if(!ready)return <div className="class-window"><p className="jw-loading">正在打开…</p></div>;
+    return <div className="class-window weight-window"><WeightEditor key={weightSurface} date={weightSurface} weights={data.weights} onSave={kg=>saveWeight(weightSurface,kg)} onClose={()=>void window.desktop?.closeEditor()}/></div>;
+  }
+  if(classSurface){
+    const slot=timetable.slots.find(item=>item.id===classSurface.slot);
+    const mark=classMarkFor(data.classMarks,classSurface.slot,classSurface.date);
+    if(!ready)return <div className="class-window"><p className="jw-loading">正在打开…</p></div>;
+    if(!slot&&!mark)return <div className="class-window"><p className="jw-loading">找不到这节课</p></div>;
+    return <div className="class-window"><ClassEditor key={`${classSurface.slot}:${classSurface.date}`} title={slot?.title??mark?.title??''} time={slot?`${slot.start}–${slot.end}`:''} date={classSurface.date} mark={mark} state={classState(mark,classSurface.date,slot?.end??'00:00')} onSave={(status,note)=>setClassStatus(slot??{id:classSurface.slot,title:mark?.title??''},classSurface.date,status,note)} onClose={()=>void window.desktop?.closeEditor()}/></div>;
+  }
+  if(reviewQuickSurface){
+    const todays=activeReflections(data.reflections).filter(item=>item.date===today);
+    const submitQuick=()=>{if(!quickReview.trim())return;addReviewNow(quickReview);setQuickReview('');};
+    return <div className="review-quick">
+      <header><span><Lightbulb size={16}/>记一条复盘</span><small>{todays.length?`今天已记 ${todays.length} 条`:'今天还没记'}</small></header>
+      <textarea ref={quickReviewRef} autoFocus rows={3} value={quickReview} maxLength={5000} placeholder={'写下一条感悟，回车记下，可以接着写下一条\nShift+回车换行 · Esc 关闭'} onChange={e=>setQuickReview(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();void window.desktop?.closeEditor();return;}if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.keyCode!==229){e.preventDefault();submitQuick();}}}/>
+      {todays.length>0&&<ol start={Math.max(1,todays.length-2)}>{todays.slice(-3).map(item=><li key={item.id}>{item.text}</li>)}</ol>}
+      <footer><span>Ctrl+Alt+F 随时打开</span><button className="primary" disabled={!quickReview.trim()||!ready} onClick={submitQuick}>记下</button></footer>
+    </div>;
+  }
+  if(journalSurface){
+    const day=parseDate(journalDate);
+    const tasks=tasksForDate(activeTasks,journalDate);
+    const festival=festivalName(journalDate);
+    const weekday=day.toLocaleDateString('zh-CN',{weekday:'long'});
+    const go=(next:string)=>{journalFlush.current();setJournalDate(next);};
+    return <div className="journal-window">
+      <header className="jw-head">
+        <div className="jw-date"><span className="jw-day">{day.getDate()}</span><div><strong>{day.getFullYear()} 年 {day.getMonth()+1} 月 · {weekday}</strong><small>{festival||`农历${formatLunar(journalDate)}`}{journalDate===today?' · 今天':''}</small></div></div>
+        <div className="jw-nav"><button aria-label="前一天" title="前一天" onClick={()=>go(addDays(journalDate,-1))}><ChevronLeft size={18}/></button>{journalDate!==today&&<button className="jw-today" onClick={()=>go(today)}>今天</button>}<button aria-label="后一天" title="后一天" onClick={()=>go(addDays(journalDate,1))}><ChevronRight size={18}/></button></div>
+      </header>
+      <div className="jw-body">
+        <div className="jw-paper">{ready&&loadedKey===storageKey?<JournalEditor key={`${storageKey}:${journalDate}`} date={journalDate} text={journalText(data.journal,journalDate)} focus={1} onSave={saveJournalNow} onCount={setJournalCount} flushRef={journalFlush} className="jw-text" placeholder={'今天过得怎么样？\n\n写下发生的事、心情，或者一句想对自己说的话。'}/>:<p className="jw-loading">正在打开日记本…</p>}</div>
+        {tasks.length>0&&<aside className="jw-side"><h3>这一天</h3>{tasks.map(task=><div key={task.id} className={`jw-task ${isDone(task,journalDate)?'done':''}`}><i style={{background:task.color||listOf(task.listId)?.color}}/><span>{task.time&&<small>{task.time}</small>}{task.title}</span></div>)}</aside>}
+      </div>
+      <footer className="jw-foot"><span>{journalCount?`${journalCount} 字`:'空白的日记不会保存'}</span><span>{journalSaved?`已自动保存 · ${journalSaved}`:'边写边自动保存 · 只有你能看到'}</span></footer>
+    </div>;
+  }
+
   return <div className={`app ${!panel?'panel-hidden':''} ${mobileMenu?'menu-open':''} ${desktopSurface?'desktop-calendar':''}  ${editorSurface&&!cellEditorSurface?'editor-only':''} ${cellEditorSurface?'cell-editor-surface':''}`} data-span={desktopSurface?widgetSpan:undefined}>
     {!desktopSurface&&!cellEditorSurface&&<aside className="sidebar">
       <a className="brand" href="#" onClick={e=>{e.preventDefault();goToday();}}><img src="./icon.svg" alt=""/><span>昱时<small>让每一天，有条不紊</small></span></a>
@@ -413,26 +636,36 @@ function App() {
         <button className={section==='calendar'&&filter==='all'?'active':''} onClick={()=>{setSection('calendar');setFilter('all');setView('month');setMobileMenu(false);}}><CalendarDays size={18}/>我的日历</button>
         <button className={section==='today'?'active':''} onClick={()=>{goToday();setSection('today');setView('day');setMobileMenu(false);}}><Sun size={18}/>今天<span>{todayTasks.filter(t=>!isDone(t,today)).length}</span></button>
         <button className={section==='inbox'?'active':''} onClick={()=>{setSection('inbox');setFilter('all');setMobileMenu(false);}}><Inbox size={18}/>收集箱<span>{activeTasks.filter(t=>!t.date&&!t.completed).length}</span></button>
+        <button className={section==='journal'?'active':''} onClick={()=>{setSection('journal');setFilter('all');setMobileMenu(false);}}><BookOpen size={18}/>日记<span>{writtenEntries(data.journal).length}</span></button>
+        <button className={section==='weight'?'active':''} onClick={()=>{setSection('weight');setFilter('all');setMobileMenu(false);}}><Scale size={18}/>体重<span>{weightOn(data.weights,today)?weightOn(data.weights,today)!.kg.toFixed(1):weightHistory(data.weights).length}</span></button>
+        <button className={section==='class-review'?'active':''} onClick={()=>{setSection('class-review');setFilter('all');setMobileMenu(false);}}><BookMarked size={18}/>待复习<span>{reviewClasses(data.classMarks).length}</span></button>
+        <button className={section==='weekly'?'active':''} onClick={()=>{setSection('weekly');setFilter('all');setMobileMenu(false);}}><Target size={18}/>周次任务<span>{activeGoals(data.goals).length}</span></button>
+        <button className={section==='review'?'active':''} onClick={()=>{setSection('review');setReviewMode('day');setFilter('all');setMobileMenu(false);}}><Lightbulb size={18}/>复盘<span>{activeReflections(data.reflections).length}</span></button>
       </nav>
       <div className="nav-heading">我的清单 <span>{data.lists.length}</span></div>
       <nav className="list-nav">{data.lists.map(list=><button key={list.id} className={filter===list.id?'active':''} onClick={()=>{setFilter(list.id);setSection('calendar');setMobileMenu(false);}}><i style={{background:list.color}}/>{list.name}<span>{activeTasks.filter(t=>t.listId===list.id&&!isDone(t,t.date||today)).length}</span></button>)}</nav>
       <div className="sidebar-bottom"><div className="daily-progress"><div><span>今天的每一小步</span><strong>{completedToday}<em> / {todayTasks.length}</em></strong></div><div className="progress-track"><i style={{width:`${todayTasks.length?completedToday/todayTasks.length*100:0}%`}}/></div><small>{todayTasks.length?'按自己的节奏，慢慢完成。':'留一点时间，给重要的事。'}</small></div>
-      <button className="settings-link" onClick={()=>setSettings(true)}><Settings size={17}/>设置与同步<span className={`status-dot ${user&&syncState==='已同步'?'online':''}`}/></button>
-      <div className="profile"><div className="avatar">{user?'我':'昱'}</div><div><strong>{user?.email?.split('@')[0]||'我的空间'}</strong><small>{user?syncState:'离线可用 · 本机保存'}</small></div><button className="icon-button" title="账号与同步" onClick={()=>setSettings(true)}><MoreHorizontal size={18}/></button></div></div>
+      <button className="settings-link" onClick={()=>setSettings(true)}><Settings size={17}/>设置与同步<span className={`status-dot ${user&&syncLabel==='已同步'?'online':''}`}/></button>
+      <div className="profile"><div className="avatar">{user?'我':'昱'}</div><div><strong>{user?.email?.split('@')[0]||'我的空间'}</strong><small>{user?syncLabel:'离线可用 · 本机保存'}</small></div><button className="icon-button" title="账号与同步" onClick={()=>setSettings(true)}><MoreHorizontal size={18}/></button></div></div>
     </aside>}
     {!desktopSurface&&mobileMenu&&<button className="menu-scrim" aria-label="关闭导航" onClick={()=>setMobileMenu(false)}/>}
     {!cellEditorSurface&&<main className="main">
-      {!desktopSurface&&<><header className="topbar"><div className="location"><button className="icon-button mobile-only" aria-label="菜单" onClick={()=>setMobileMenu(true)}><Menu size={20}/></button><span className="breadcrumb">我的空间</span><span className="slash">/</span><strong>{section==='inbox'?'收集箱':filter==='all'?'日历':listOf(filter)?.name}</strong><span className="private-pill">个人</span></div><div className="top-actions"><label className="search"><Search size={16}/><input id="search" placeholder="搜索日程" value={query} onChange={e=>setQuery(e.target.value)}/><kbd>⌘ K</kbd></label><button className="icon-button" title="显示设置" onClick={()=>setSettings(true)}><Settings size={18}/></button></div></header>
-      <div className="calendar-heading"><div><div className="eyebrow">A LITTLE SPACE FOR YOUR EVERYDAY</div><h1>{section==='inbox'?'收集箱':view==='day'?dateLabel(selected):`${month.getFullYear()} 年 ${month.getMonth()+1} 月`}<span className="month-en">{!isList&&view==='month'?month.toLocaleString('en',{month:'long'}):''}</span></h1><p>{section==='inbox'?'先记下来，再为它找一个合适的时间。':view==='day'?'展开一天，让时间为重要的事留白。':'生活的大小事，都在这一页。'}</p></div><button className="today-button" onClick={goToday}><span/>回到今天</button></div>
+      {!desktopSurface&&<><header className="topbar"><div className="location"><button className="icon-button mobile-only" aria-label="菜单" onClick={()=>setMobileMenu(true)}><Menu size={20}/></button><span className="breadcrumb">我的空间</span><span className="slash">/</span><strong>{section==='weight'?'体重':section==='class-review'?'待复习':section==='weekly'?'周次任务':section==='review'?'复盘':section==='journal'?'日记':section==='inbox'?'收集箱':filter==='all'?'日历':listOf(filter)?.name}</strong><span className="private-pill">个人</span></div><div className="top-actions"><label className="search"><Search size={16}/><input id="search" placeholder="搜索日程" value={query} onChange={e=>setQuery(e.target.value)}/><kbd>⌘ K</kbd></label><button className="icon-button" title="显示设置" onClick={()=>setSettings(true)}><Settings size={18}/></button></div></header>
+      <div className="calendar-heading"><div><div className="eyebrow">A LITTLE SPACE FOR YOUR EVERYDAY</div><h1>{section==='weight'?'体重':section==='class-review'?'待复习':section==='weekly'?'周次任务':section==='review'?'复盘':section==='journal'?'日记':section==='inbox'?'收集箱':view==='day'?dateLabel(selected):`${month.getFullYear()} 年 ${month.getMonth()+1} 月`}<span className="month-en">{!isList&&view==='month'?month.toLocaleString('en',{month:'long'}):''}</span></h1><p>{section==='weight'?'每天早上 08:00 测一下，记下数字，看看走势。':section==='class-review'?'标成“待复习”的课都在这里，复习完点一下就好。':section==='weekly'?'每周做几次、不定具体哪天的事，做够次数就好。':section==='review'?'对一件事的感悟，回车就是一条；每周日把这一周的连起来看。':section==='journal'?'只属于你自己的每一天，按日期从近到远。':section==='inbox'?'先记下来，再为它找一个合适的时间。':view==='day'?'展开一天，让时间为重要的事留白。':'生活的大小事，都在这一页。'}</p></div><button className="today-button" onClick={goToday}><span/>回到今天</button></div>
       <div className="toolbar"><div className="toolbar-left"><div className="arrow-group"><button className="icon-button" aria-label="上一页" onClick={()=>navigate(-1)}><ChevronLeft size={18}/></button><button className="icon-button" aria-label="下一页" onClick={()=>navigate(1)}><ChevronRight size={18}/></button></div><span className="toolbar-date">{view==='day'?formatLunar(selected):`${month.getMonth()+1} 月 · ${month.getFullYear()}`}</span><span className="divider"/><button className={`text-button ${hideDone?'selected':''}`} onClick={()=>setHideDone(v=>!v)}><CheckCheck size={15}/>{hideDone?'已隐藏完成':'显示已完成'}</button></div><div className="toolbar-right"><div className="view-switch">{([['month','月历'],['day','时间表'],['list','清单']] as const).map(([value,label])=><button key={value} className={view===value&&section!=='inbox'?'active':''} onClick={()=>{setView(value);if(section==='inbox')setSection('calendar');}}>{label}</button>)}</div><button className="icon-button fullscreen-button" title="铺满屏幕" onClick={()=>void changeMode('fullscreen')}><Maximize2 size={16}/></button><button className="icon-button panel-toggle" title={panel?'收起当天安排':'打开当天安排'} onClick={()=>setPanel(v=>!v)}>{panel?<PanelRightClose size={18}/>:<PanelRightOpen size={18}/>}</button></div></div>
       </>}
-      {desktopSurface&&<header className="widget-heading"><div className="widget-month"><CalendarDays size={21}/><h1>{widgetSpan==='month'?<>{month.getFullYear()} 年 <strong>{month.getMonth()+1} 月</strong></>:<strong>{widgetRangeLabel}</strong>}</h1></div><div className="widget-controls"><button title="上一段" aria-label="上一段" onClick={()=>navigate(-1)}><ChevronLeft size={18}/></button><button onClick={goToday}>今天</button><button title="下一段" aria-label="下一段" onClick={()=>navigate(1)}><ChevronRight size={18}/></button><i/><div className="widget-span-switch" aria-label="显示范围">{([['week','一周'],['twoWeeks','两周'],['month','整月']] as const).map(([span,label])=><button key={span} className={widgetSpan===span?'active':''} onClick={()=>void changeWidgetSpan(span)}>{label}</button>)}</div><button onClick={()=>setTimetableVisible(!showTimetable)} className={showTimetable?'active':''} title="在日期格里显示或隐藏课表" aria-label="课表"><GraduationCap size={16}/></button><button onClick={()=>newTask(selected)} title="新建日程"><Plus size={16}/></button><button title="打开管理窗口" aria-label="打开管理窗口" onClick={()=>{if(window.desktop)void window.desktop.showWindow();else window.open(window.location.href.split('#')[0],'yushi-manager');}}><Settings size={17}/></button></div></header>}
+      {desktopSurface&&<header className="widget-heading"><div className="widget-month"><CalendarDays size={21}/><h1>{widgetSpan==='month'?<>{month.getFullYear()} 年 <strong>{month.getMonth()+1} 月</strong></>:<strong>{widgetRangeLabel}</strong>}</h1></div><GoalStrip goals={data.goals} marks={data.goalMarks} today={today} actions={weeklyActions}/><div className="widget-controls"><button title="上一段" aria-label="上一段" onClick={()=>navigate(-1)}><ChevronLeft size={18}/></button><button onClick={goToday}>今天</button><button title="下一段" aria-label="下一段" onClick={()=>navigate(1)}><ChevronRight size={18}/></button><i/><div className="widget-span-switch" aria-label="显示范围">{([['focus','7 天'],['week','一周'],['twoWeeks','两周'],['month','整月']] as const).map(([span,label])=><button key={span} className={widgetSpan===span?'active':''} onClick={()=>void changeWidgetSpan(span)}>{label}</button>)}</div><button onClick={()=>setTimetableVisible(!showTimetable)} className={showTimetable?'active':''} title="在日期格里显示或隐藏课表" aria-label="课表"><GraduationCap size={16}/></button><button onClick={()=>{if(window.desktop?.openReviewQuick)void window.desktop.openReviewQuick().then(result=>{if(!result.ok)toast(result.error||'复盘输入框打不开');});else{setSection('review');}}} title="记一条复盘（Ctrl+Alt+F）" aria-label="记一条复盘"><Lightbulb size={16}/></button><button onClick={()=>newTask(selected)} title="新建日程"><Plus size={16}/></button><button title="打开管理窗口" aria-label="打开管理窗口" onClick={()=>{if(window.desktop)void window.desktop.showWindow();else window.open(window.location.href.split('#')[0],'yushi-manager');}}><Settings size={17}/></button></div></header>}
       {!ready&&<div className="load-notice">正在载入你的安排…</div>}
       <div className="calendar-body">
-      {isList?<div className="list-view"><div className="list-view-title"><h2>{section==='inbox'?'还没有日期的事':'全部日程'}</h2><span>{listed.length} 项</span></div><form className="inline-add" onSubmit={quickAdd}><Plus size={18}/><input aria-label="快速添加任务" placeholder={section==='inbox'?'记下一个待办，按 Enter 保存':'添加到选中的日期，按 Enter 保存'} value={quick} onChange={e=>setQuick(e.target.value)}/><button type="submit">添加</button></form>{listed.map(task=><div className="list-item" key={task.id}>{taskRow(task,task.date||selected)}<span className="list-date">{task.date||'未安排'}{task.repeat!=='none'&&' 起 · 重复'}</span></div>)}{!listed.length&&<div className="empty-state"><Inbox size={34}/><h3>{query?'没有找到相关日程':'先把想做的事，记下来'}</h3><p>{query?'换一个关键词再试试。':'你可以稍后再安排日期和时间。'}</p></div>}</div>
-      :view==='month'||desktopSurface?<div className="month-view"><div className="weekdays">{WEEK.map((w,i)=><span key={w} className={i>4?'weekend':''}>周{w}</span>)}</div><div className="month-grid" ref={monthGridRef}>{days.map(day=>{const dt=parseDate(day),tasks=onDate(day),mark=dayMark(day),festival=festivalName(day),german=germanHoliday(day,germanState),classes=desktopSurface&&showTimetable?classesForDate(timetable,day,!!german):null;const renderItem=(item:AgendaItem,pos?:React.CSSProperties)=>{if(item.kind==='class'){const slot=item.slot;return <span key={`class-${slot.id}`} className={`calendar-event class-event ${slot.dashed?'dashed':''} ${slot.alert?'alert':''}`} style={{'--event-color':CLASS_COLOR,...pos} as React.CSSProperties} title={`${slot.start}–${slot.end} ${slot.title}${slot.alert?` · ⚠ ${slot.alert}`:''}${slot.note?` · ${slot.note}`:''}`}><b className="class-tag">课</b><small>{slot.start}</small>{slot.alert&&<b aria-label={slot.alert}>⚠</b>}<span>{slot.title||'未命名'}</span></span>;}const task=item.task;return <button key={task.id} onPointerDown={calendarPointerDown} onPointerMove={calendarPointerMove} onPointerUp={e=>calendarPointerUp(e,task,day)} onPointerCancel={e=>{calendarDrag.current=null;e.currentTarget.style.opacity=''}} className={`calendar-event ${isDone(task,day)?'done':''}`} style={{'--event-color':task.color||listOf(task.listId)?.color,...pos} as React.CSSProperties} title={desktopSurface?`${task.time?`${task.time} `:''}${task.title} · 单击标记完成，双击编辑`:undefined} onClick={e=>{e.stopPropagation();if(skipCalendarClick.current){skipCalendarClick.current=false;return;}if(!desktopSurface){editTask(task,day);return;}if(eventClickTimer.current)clearTimeout(eventClickTimer.current);eventClickTimer.current=setTimeout(()=>{eventClickTimer.current=null;complete(task,day);},250);}} onDoubleClick={e=>{e.stopPropagation();if(!desktopSurface)return;if(eventClickTimer.current){clearTimeout(eventClickTimer.current);eventClickTimer.current=null;}editTask(task,day);}}><i/>{task.time&&<small>{task.time}</small>}{task.priority==='high'&&<Star className="event-star" size={10} fill="currentColor" aria-label="星标"/>}<span>{task.title}</span>{task.notes&&<em className="event-notes">{task.notes}</em>}{task.repeat!=='none'&&<Repeat2 size={10}/>}</button>;};const layout=cellLayout(dayAgenda(tasks,classes));return <div key={day} data-date={day} tabIndex={0} role="button" aria-label={`${day}，${tasks.length} 项日程`} className={`day-cell ${dt.getMonth()!==month.getMonth()?'outside':''} ${day===today?'today':''} ${day===selected?'selected':''} ${mark?.kind==='rest'?'rest-day':''}`} onClick={()=>{selectDate(day);if(desktopSurface){if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);}else if(window.innerWidth<=1000)setView('day');}} onDoubleClick={e=>{if((e.target as Element).closest('button,.desktop-inline-editor'))return;if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);selectDate(day);if(desktopSurface){e.preventDefault();newTask(day);}else setView('day');}} onKeyDown={e=>{if(e.target!==e.currentTarget)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();selectDate(day);if(desktopSurface)newTask(day);}}} onDragOver={e=>{e.preventDefault();e.currentTarget.classList.add('dragover');}} onDragLeave={e=>e.currentTarget.classList.remove('dragover')} onDrop={e=>drop(e,day)}>
-        <div className="cell-top"><span className="day-number">{dt.getDate()}</span><span className={`lunar ${festival?'festival':''}`}>{festival||formatLunar(day)}</span>{mark&&<span className={`day-mark ${mark.kind}`} title={`${mark.name}${mark.kind==='rest'?'放假':'调休上班'}`}>{mark.kind==='rest'?'休':'班'}</span>}{german&&<span className="de-holiday" title={`德国假日：${german.german}（${german.name}）`}>德·{german.name}</span>}<button className="cell-add" title={`在 ${day} 新建日程`} onClick={e=>{e.stopPropagation();newTask(day);}}><Plus size={13}/></button></div>
-        <div className="cell-timeline"><CellHours>{layout.timed.map(placed=>renderItem(placed.item,{top:`${placed.top*100}%`,height:`${placed.height*100}%`,left:`${placed.lane/placed.lanes*100}%`,width:`${100/placed.lanes}%`}))}</CellHours>{layout.untimed.length>0&&<CellTasks onMore={()=>selectDate(day)}>{layout.untimed.map(item=>renderItem(item))}</CellTasks>}</div>
+      {section==='weight'?<WeightView weights={data.weights} today={today} remind={weightReminder} onOpen={date=>setWeightEdit(date)}/>
+      :section==='class-review'?<ReviewClassList marks={data.classMarks} onDone={mark=>setClassStatus({id:mark.slotId,title:mark.title},mark.date,'done')} onOpen={openClassMark}/>
+      :section==='weekly'?<WeeklyView goals={data.goals} marks={data.goalMarks} today={today} remind={goalReminder} actions={weeklyActions}/>
+      :section==='review'?<ReviewView reflections={data.reflections} today={today} initialMode={reviewMode} remind={reviewReminder} onAdd={addReview} onEdit={editReview}/>
+      :section==='journal'?<JournalList journal={data.journal} today={today} onOpen={date=>openJournal(date)}/>
+      :isList?<div className="list-view"><div className="list-view-title"><h2>{section==='inbox'?'还没有日期的事':'全部日程'}</h2><span>{listed.length} 项</span></div><form className="inline-add" onSubmit={quickAdd}><Plus size={18}/><input aria-label="快速添加任务" placeholder={section==='inbox'?'记下一个待办，按 Enter 保存':'添加到选中的日期，按 Enter 保存'} value={quick} onChange={e=>setQuick(e.target.value)}/><button type="submit">添加</button></form>{listed.map(task=><div className="list-item" key={task.id}>{taskRow(task,task.date||selected)}<span className="list-date">{task.date||'未安排'}{task.repeat!=='none'&&' 起 · 重复'}</span></div>)}{!listed.length&&<div className="empty-state"><Inbox size={34}/><h3>{query?'没有找到相关日程':'先把想做的事，记下来'}</h3><p>{query?'换一个关键词再试试。':'你可以稍后再安排日期和时间。'}</p></div>}</div>
+      :view==='month'||desktopSurface?<div className="month-view">{!(desktopSurface&&widgetSpan==='focus')&&<div className="weekdays">{WEEK.map((w,i)=><span key={w} className={i>4?'weekend':''}>周{w}</span>)}</div>}<div className="month-grid" ref={monthGridRef} style={desktopSurface&&widgetSpan==='focus'?{gridTemplateColumns:days.map(day=>day===today?'minmax(0,2.3fr)':'minmax(0,1fr)').join(' ')}:undefined}>{days.map(day=>{const dt=parseDate(day),tasks=onDate(day),mark=dayMark(day),festival=festivalName(day),german=germanHoliday(day,germanState),classes=desktopSurface&&showTimetable?classesForDate(timetable,day,!!german):null;const renderItem=(item:AgendaItem,pos?:React.CSSProperties)=>{if(item.kind==='weight'){const kg=item.kg;return <button key="weight" className={`calendar-event weight-event ${kg!==undefined?'done':''}`} style={{'--event-color':'#C9822B',...pos} as React.CSSProperties} title={kg!==undefined?`测体重 · ${kg.toFixed(1)} kg · 点一下修改`:'测体重 · 点一下填数字'} onClick={e=>{e.stopPropagation();openWeight(day);}} onDoubleClick={e=>e.stopPropagation()}><i/><small>{WEIGHT_TIME}</small><span>测体重{kg!==undefined?` ${kg.toFixed(1)} kg`:''}</span></button>;}if(item.kind==='class'){const slot=item.slot;const mark=classMarkFor(data.classMarks,slot.id,day);const state=classState(mark,day,slot.end);return <span key={`class-${slot.id}`} role="button" tabIndex={-1} className={`calendar-event class-event status-${state} ${slot.dashed?'dashed':''} ${slot.alert?'alert':''}`} style={{'--event-color':CLASS_STATE_COLOR[state],...pos} as React.CSSProperties} title={`${classTitle(slot,state,mark)} · ${desktopSurface?'单击切换已上/待复习/未上，双击写备注':'点击编辑'}`} onClick={e=>{e.stopPropagation();if(!desktopSurface){openClass(slot,day);return;}if(classClickTimer.current)clearTimeout(classClickTimer.current);classClickTimer.current=setTimeout(()=>{classClickTimer.current=null;setClassStatus(slot,day,nextClassState(state));},250);}} onDoubleClick={e=>{e.stopPropagation();if(classClickTimer.current){clearTimeout(classClickTimer.current);classClickTimer.current=null;}openClass(slot,day);}}><b className="class-tag">课</b>{STATE_TAG[state]&&<b className={`class-state status-${state}`}>{STATE_TAG[state]}</b>}<small>{slot.start}–{slot.end}</small>{slot.alert&&<b aria-label={slot.alert}>⚠</b>}<span>{slot.title||'未命名'}</span>{slot.note&&<em className="class-note">{slot.note}</em>}</span>;}if(item.kind==='goal'){const {goal,mark}=item;const end=timeMinutes(mark.time!)+markDuration(goal,mark);return <button key={mark.id} onPointerDown={calendarPointerDown} onPointerMove={calendarPointerMove} onPointerUp={e=>goalPointerUp(e,mark)} onPointerCancel={e=>{calendarDrag.current=null;e.currentTarget.style.opacity=''}} className={`calendar-event goal-event ${mark.done?'done':'planned'}`} style={{'--event-color':goal.color,...pos} as React.CSSProperties} title={`${mark.time}–${minutesTime(Math.min(1440,end))} ${goal.name}${mark.done?' · 已完成':' · 安排'} · ${desktopSurface?'单击标记完成；按住上下拖改时间、左右拖改日期；双击打开管理窗口':'点击标记完成'}`} onClick={e=>{e.stopPropagation();if(skipCalendarClick.current){skipCalendarClick.current=false;return;}if(eventClickTimer.current)clearTimeout(eventClickTimer.current);eventClickTimer.current=setTimeout(()=>{eventClickTimer.current=null;weeklyActions.setMarkDone(mark.id,!mark.done);},desktopSurface?250:0);}} onDoubleClick={e=>{e.stopPropagation();if(eventClickTimer.current){clearTimeout(eventClickTimer.current);eventClickTimer.current=null;}openJournal(day,false);}}><i/><small>{mark.time}</small>{mark.done&&<Check size={10}/>}<span>{goal.name}</span></button>;}const task=item.task;return <button key={task.id} onPointerDown={calendarPointerDown} onPointerMove={calendarPointerMove} onPointerUp={e=>calendarPointerUp(e,task,day)} onPointerCancel={e=>{calendarDrag.current=null;e.currentTarget.style.opacity=''}} className={`calendar-event ${isDone(task,day)?'done':''}`} style={{'--event-color':task.color||listOf(task.listId)?.color,...pos} as React.CSSProperties} title={desktopSurface?`${task.time?`${task.time}–${minutesTime(Math.min(1440,timeMinutes(task.time)+task.duration))} `:''}${task.title} · 单击标记完成，双击编辑`:undefined} onClick={e=>{e.stopPropagation();if(skipCalendarClick.current){skipCalendarClick.current=false;return;}if(!desktopSurface){editTask(task,day);return;}if(eventClickTimer.current)clearTimeout(eventClickTimer.current);eventClickTimer.current=setTimeout(()=>{eventClickTimer.current=null;complete(task,day);},250);}} onDoubleClick={e=>{e.stopPropagation();if(!desktopSurface)return;if(eventClickTimer.current){clearTimeout(eventClickTimer.current);eventClickTimer.current=null;}editTask(task,day);}}><i/>{item.time&&<small>{item.time}–{minutesTime(Math.min(1440,timeMinutes(item.time)+task.duration))}</small>}{task.priority==='high'&&<Star className="event-star" size={10} fill="currentColor" aria-label="星标"/>}<span>{task.title}</span>{task.notes&&<em className="event-notes">{task.notes}</em>}{task.repeat!=='none'&&<Repeat2 size={10}/>}</button>;};const layout=cellLayout((agenda=>doneBottom?doneToBottom(agenda,task=>isDone(task,day)):agenda)(dayAgenda(tasks,classes,[],day===today&&!weightOn(data.weights,day)?{time:WEIGHT_TIME,date:day}:undefined)));return <div key={day} data-date={day} tabIndex={0} role="button" aria-label={`${day}，${tasks.length} 项日程`} className={`day-cell ${dt.getMonth()!==month.getMonth()&&!(desktopSurface&&widgetSpan==='focus')?'outside':''} ${day===today?'today':''} ${day===selected?'selected':''} ${mark?.kind==='rest'?'rest-day':''}`} onClick={()=>{selectDate(day);if(desktopSurface){if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);}else if(window.innerWidth<=1000)setView('day');}} onDoubleClick={e=>{if((e.target as Element).closest('button,.desktop-inline-editor,.class-event'))return;if(desktopClickTimer.current)clearTimeout(desktopClickTimer.current);selectDate(day);if(desktopSurface){e.preventDefault();newTask(day);}else setView('day');}} onKeyDown={e=>{if(e.target!==e.currentTarget)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();selectDate(day);if(desktopSurface)newTask(day);}}} onDragOver={e=>{e.preventDefault();e.currentTarget.classList.add('dragover');}} onDragLeave={e=>e.currentTarget.classList.remove('dragover')} onDrop={e=>drop(e,day)}>
+        <div className="cell-top"><span className="day-number">{dt.getDate()}</span>{desktopSurface&&widgetSpan==='focus'&&<span className="focus-weekday">周{WEEK[(dt.getDay()+6)%7]}{day===today?' · 今天':''}</span>}<span className={`lunar ${festival?'festival':''}`}>{festival||formatLunar(day)}</span>{mark&&<span className={`day-mark ${mark.kind}`} title={`${mark.name}${mark.kind==='rest'?'放假':'调休上班'}`}>{mark.kind==='rest'?'休':'班'}</span>}{german&&<span className="de-holiday" title={`德国假日：${german.german}（${german.name}）`}>德·{german.name}</span>}{(()=>{const written=hasJournal(data.journal,day);return <button className={`journal-mark ${written?'done':day===today?'pending':'idle'}`} title={`${written?'这天的日记已写':day===today?`今天的日记还没写${journalReminder?`，${JOURNAL_REMINDER_TIME} 会提醒`:''}`:'写这天的日记'} · 双击打开日记本`} aria-label={written?`${day} 的日记（已完成）`:`写 ${day} 的日记`} onClick={e=>{e.stopPropagation();if(journalClickTimer.current)clearTimeout(journalClickTimer.current);journalClickTimer.current=setTimeout(()=>{journalClickTimer.current=null;openJournal(day);},260);}} onDoubleClick={e=>{e.stopPropagation();if(journalClickTimer.current){clearTimeout(journalClickTimer.current);journalClickTimer.current=null;}openJournalWindow(day);}}>{written?'日记✓':'日记'}</button>;})()}<button className="cell-add" title={`在 ${day} 新建日程`} onClick={e=>{e.stopPropagation();newTask(day);}}><Plus size={13}/></button></div>
+        <div className="cell-timeline">{(()=>{const axis=desktopSurface&&widgetSpan==='focus';const big=axis&&day===today;const hours=<CellHours>{layout.timed.map(placed=>renderItem(placed.item,{top:`${placed.top*100}%`,height:`${placed.height*100}%`,left:`${placed.lane/placed.lanes*100}%`,width:`${100/placed.lanes}%`}))}</CellHours>;return axis?<div className={`cell-hours-row ${big?'big':''}`}><CellAxis big={big}/>{hours}</div>:hours;})()}{(()=>{const doneItems=doneBottom?layout.untimed.filter(item=>item.kind==='task'&&isDone(item.task,day)):[];const open=layout.untimed.filter(item=>!doneItems.includes(item));return <>{open.length>0&&<CellTasks onMore={()=>selectDate(day)}>{open.map(item=>renderItem(item))}</CellTasks>}{doneItems.length>0&&<DoneBar>{doneItems.map(item=>renderItem(item))}</DoneBar>}</>;})()}</div>
         {desktopSurface&&edit&&editDate===day&&inlineEditor}
       </div>;})}</div><footer className="calendar-footer"><span><i className="hint-dot"/>{desktopSurface?'单击日程标记完成 · 双击日程或日期编辑 · 右键打开桌面菜单':'双击日期展开时间表 · 拖动日程调整日期'}</span><span>{filtered.length} 项日程 <span className="footer-sep">·</span> 周一开始</span></footer></div>
       :daySchedule}
@@ -443,11 +676,17 @@ function App() {
     {!desktopSurface&&!cellEditorSurface&&panel&&<aside className="day-panel"><div className="panel-title"><span><Sun size={16}/> {selected===today?'今天的安排':'当天安排'}</span><button className="icon-button" title="收起面板" onClick={()=>setPanel(false)}><PanelRightClose size={17}/></button></div><div className="selected-date"><span>{parseDate(selected).getDate()}</span><div><strong>{parseDate(selected).toLocaleDateString('zh-CN',{weekday:'long'})}</strong><small>{parseDate(selected).getFullYear()} 年 {parseDate(selected).getMonth()+1} 月 · {formatLunar(selected)}</small></div><button className="icon-button" title="展开小时日程" onClick={()=>{setView('day');setSection('calendar');}}><ArrowUpRight size={19}/></button></div><button className="expand-timeline" onClick={()=>{setView(view==='day'?'month':'day');setSection('calendar');}}><Clock3 size={16}/>{view==='day'?'返回月历':'展开 24 小时时间表'}<ChevronRight size={15}/></button>
       <div className="day-summary"><div><strong>{dayTasks.length}</strong><span>项安排</span></div><div><strong>{dayTasks.filter(t=>isDone(t,selected)).length}</strong><span>已完成</span></div><div><strong>{Math.round(dayTasks.filter(t=>t.time).reduce((n,t)=>n+t.duration,0)/60*10)/10}<small>h</small></strong><span>计划用时</span></div></div>
       <div className="panel-section-title">日程与待办 <button className="icon-button" title="添加当天日程" onClick={()=>newTask(selected)}><Plus size={16}/></button></div><div className="panel-tasks">{dayTasks.map(task=>taskRow(task,selected))}{!dayTasks.length&&<div className="empty-day"><div className="empty-day-icon"><Sun size={28}/></div><h3>{query?'没有匹配的安排':'今天，留白也很好'}</h3><p>把重要的事记在这里，<br/>剩下的时间，交给生活。</p><button onClick={()=>newTask(selected)}><Plus size={14}/> 添加第一项安排</button></div>}</div><form className="panel-quick" onSubmit={quickAdd}><Plus size={16}/><input aria-label="添加当天待办" placeholder="添加一个待办…" value={quick} onChange={e=>setQuick(e.target.value)}/></form>
+      {(()=>{const rows=showTimetable?classesForDate(timetable,selected,!!germanHoliday(selected,germanState)):null;const list=(rows??[]).flatMap(row=>row.slots);return list.length>0&&<><div className="panel-section-title"><span className="journal-title"><GraduationCap size={13}/>这天的课</span></div><DayClasses classes={list} date={selected} marks={data.classMarks} onSet={(slot,status)=>setClassStatus(slot,selected,status)} onEdit={slot=>openClass(slot,selected)}/></>;})()}
+      {activeGoals(data.goals).length>0&&<><div className="panel-section-title"><span className="journal-title"><Target size={13}/>周次任务</span></div><GoalDay goals={data.goals} marks={data.goalMarks} date={selected} actions={weeklyActions}/></>}
+      <div className="panel-section-title"><span className="journal-title"><BookOpen size={13}/>日记{hasJournal(data.journal,selected)?<em className="journal-state done">已完成</em>:selected===today?<em className="journal-state">未写</em>:null}</span><span className="journal-tools">{journalText(data.journal,selected).trim()&&<small className="journal-count">{journalLength(journalText(data.journal,selected))} 字</small>}{window.desktop&&<button className="icon-button" title="在日记本里打开（大窗口）" aria-label="在日记本里打开" onClick={()=>openJournalWindow(selected)}><Maximize2 size={13}/></button>}</span></div>
+      <JournalEditor key={`${storageKey}:${selected}`} date={selected} text={journalText(data.journal,selected)} focus={journalFocus} onSave={saveJournal}/>
       {!activeTasks.length&&<div className="welcome-card"><span>HELLO, NEW DAY</span><h3>从一个小计划开始</h3><p>还没想好记什么？试试示例安排，感受一下昱时的节奏。</p><button onClick={loadExamples}>看看示例 <ArrowUpRight size={14}/></button></div>}
       <div className="panel-bottom"><span className="status-dot"/>{user?syncState:'所有改动保存在本机'}<button title="备份与云同步" onClick={()=>setSettings(true)}><Cloud size={15}/></button></div></aside>}
     {!desktopSurface&&<button className="mobile-fab" aria-label="新建日程" onClick={()=>newTask(selected)}><Plus size={24}/></button>}
     {edit&&!desktopSurface&&!cellEditorSurface&&<div className="modal-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setEdit(null);}}><section className="modal task-modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><header><span><CalendarDays size={18}/><h2 id="edit-title">{activeTasks.some(t=>t.id===edit.id)?'编辑日程':'新建日程'}</h2></span><button className="icon-button" aria-label="关闭编辑" onClick={()=>setEdit(null)}><X size={20}/></button></header><form onSubmit={saveTask}><input className="title-input" autoFocus placeholder="想安排什么事？" aria-label="日程名称" maxLength={200} value={edit.title} onChange={e=>setEdit({...edit,title:e.target.value})} required/><ColorSwatches value={edit.color} fallback={listOf(edit.listId)?.color} onChange={color=>setEdit(withColor(edit,color))}/><div className="form-grid"><label>日期<input type="date" aria-label="日期" min="0001-01-01" max="9999-12-31" value={edit.date} onInput={e=>setEdit({...edit,date:e.currentTarget.value})} onChange={e=>setEdit({...edit,date:e.target.value})}/></label><label>所属清单<select value={edit.listId} onChange={e=>setEdit({...edit,listId:e.target.value})}>{data.lists.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label><label>开始时间<input type="time" aria-label="开始时间" disabled={!edit.date} value={edit.time} onInput={e=>setEdit({...edit,time:e.currentTarget.value})} onChange={e=>setEdit({...edit,time:e.target.value})}/></label><label>持续时长<select disabled={!edit.time||!edit.date} value={edit.duration} onChange={e=>setEdit({...edit,duration:Number(e.target.value)})}>{[15,30,45,60,90,120,180,240,480].map(n=><option key={n} value={n}>{n<60?`${n} 分钟`:`${n/60} 小时`}</option>)}</select></label><label>重复<select disabled={!edit.date} value={edit.repeat} onChange={e=>setEdit({...edit,repeat:e.target.value as Task['repeat']})}>{Object.entries(REPEATS).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select></label><label>星标<select value={edit.priority} onChange={e=>setEdit({...edit,priority:e.target.value as Task['priority']})}><option value="normal">不加星标</option><option value="high">★ 加星标</option></select></label></div><label className="notes-label">备注<textarea value={edit.notes} maxLength={10000} placeholder="补充地点、准备事项或一点灵感…" onChange={e=>setEdit({...edit,notes:e.target.value})}/></label><div className="form-hints"><span><Bell size={13}/>{edit.time?(reminders?'将在开始时提醒':'提醒未开启，可在设置中开启'):'全天待办不发送定时提醒'}</span>{edit.repeat!=='none'&&<span><Repeat2 size={13}/>修改与删除会应用于整个重复系列；勾选仅完成当天。</span>}</div><footer><div>{activeTasks.some(t=>t.id===edit.id)&&<button type="button" className="danger icon-button" title="删除任务（重复任务删除整个系列）" onClick={deleteTask}><Trash2 size={17}/></button>}<button type="button" className="text-button" onClick={()=>setEdit({...edit,date:'',time:'',repeat:'none'})}>放入收集箱</button></div><div>{activeTasks.some(t=>t.id===edit.id)&&<button type="button" className="secondary" onClick={()=>{complete(edit,editDate||edit.date||selected);setEdit(null);}}><Check size={14}/>{isDone(edit,editDate||edit.date||selected)?'取消完成':'完成'}</button>}<button type="button" className="secondary" onClick={()=>setEdit(null)}>取消</button><button className="primary" type="submit">保存日程</button></div></footer></form></section></div>}
     {cellEditorSurface&&inlineEditor}
+    {weightEdit&&!desktopSurface&&<div className="modal-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setWeightEdit(null);}}><section className="modal weight-modal" role="dialog" aria-modal="true"><WeightEditor key={weightEdit} date={weightEdit} weights={data.weights} onSave={kg=>saveWeight(weightEdit,kg)} onClose={()=>setWeightEdit(null)}/></section></div>}
+    {classEdit&&!desktopSurface&&<div className="modal-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setClassEdit(null);}}><section className="modal class-modal" role="dialog" aria-modal="true"><ClassEditor title={classEdit.slot.title} time={classEdit.slot.start?`${classEdit.slot.start}–${classEdit.slot.end}`:''} date={classEdit.date} mark={classMarkFor(data.classMarks,classEdit.slot.id,classEdit.date)} state={classState(classMarkFor(data.classMarks,classEdit.slot.id,classEdit.date),classEdit.date,classEdit.slot.end||'00:00')} onSave={(status,note)=>setClassStatus(classEdit.slot,classEdit.date,status,note)} onClose={()=>setClassEdit(null)}/></section></div>}
     {!desktopSurface&&settings&&<div className="modal-overlay"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><span><Settings size={18}/><h2 id="settings-title">设置与同步</h2></span><button className="icon-button" aria-label="关闭设置" onClick={()=>setSettings(false)}><X size={20}/></button></header><div className="settings-content">
       <div className="settings-section"><h3><Monitor size={17}/>桌面显示</h3>{desktop?<><p>桌面只显示可编辑的日历组件，点击日期展开小时表。按 Ctrl + Alt + D 打开管理窗口，也可使用系统托盘菜单。</p><div className="mode-buttons">{([['window','仅管理窗口'],['desktop','显示桌面日历'],['fullscreen','管理窗口全屏']] as const).map(([value,label])=><button key={value} className={desktop.mode===value?'selected':''} onClick={()=>void changeMode(value)}>{label}</button>)}</div><p className="minor">日历铺满主显示器工作区；空白格可右键桌面。日期标题和日程保留操作。</p>{desktop.lastError&&<p className="minor" role="status">桌面连接状态：{desktop.lastError}</p>}<label className="setting-row">桌面日历不透明度<input type="range" min="0.35" max="1" step="0.05" value={desktop.opacity} onChange={async e=>{const result=await window.desktop!.setOpacity(Number(e.target.value));if(result.ok)setDesktop(result);}}/></label><label className="setting-row">开机启动<input type="checkbox" checked={desktop.autostart} onChange={async e=>{const result=await window.desktop!.setAutostart(e.target.checked);if(result.ok)setDesktop(result);else toast(result.error);}}/></label></>:<p>当前是浏览器 / 手机界面。Windows 客户端提供贴在桌面、透明度和系统托盘功能。</p>}</div>
       <div className="settings-section timetable-settings"><h3><GraduationCap size={17}/>课表</h3><p>学期内当天有课时，课程会用统一颜色和日程一起按时间排在日期格里；某周不上的课在“这些日子不上”里加日期，课程从中途开始或提前结束可填首次 / 末次日期；德国法定假日不显示课程。虚线表示不去现场或可调整的安排，鼠标停在课程上可看备注。</p><label className="setting-row">在桌面日期格里显示课表<input type="checkbox" checked={showTimetable} onChange={e=>setTimetableVisible(e.target.checked)}/></label>
@@ -457,15 +696,43 @@ function App() {
         <div className="timetable-breaks"><strong>停课期（这些日子不显示课程）</strong>{breaksOf(timetable).map((item,index)=><div className="timetable-row break-row" key={index}><input aria-label="停课期名称" placeholder="名称" maxLength={60} value={item.name} onChange={e=>saveTimetable({...timetable,breaks:breaksOf(timetable).map((value,i)=>i===index?{...value,name:e.target.value}:value)})}/><input type="date" aria-label="停课开始" value={item.start} onChange={e=>saveTimetable({...timetable,breaks:breaksOf(timetable).map((value,i)=>i===index?{...value,start:e.target.value}:value)})}/><input type="date" aria-label="停课结束" value={item.end} onChange={e=>saveTimetable({...timetable,breaks:breaksOf(timetable).map((value,i)=>i===index?{...value,end:e.target.value}:value)})}/><button type="button" className="icon-button" aria-label="删除停课期" onClick={()=>saveTimetable({...timetable,breaks:breaksOf(timetable).filter((_,i)=>i!==index)})}><Trash2 size={15}/></button></div>)}<button className="secondary" onClick={()=>saveTimetable({...timetable,breaks:[...breaksOf(timetable),{name:'停课',start:timetable.start,end:timetable.start}]})}><Plus size={15}/>添加停课期</button></div>
         <details><summary>课程图例（{timetable.courses.length}）</summary><div className="timetable-rows">{timetable.courses.map((course,index)=><div className="timetable-row legend-row" key={index}><input aria-label="课程代号" placeholder="代号" maxLength={20} value={course.code} onChange={e=>saveTimetable({...timetable,courses:timetable.courses.map((item,i)=>i===index?{...item,code:e.target.value}:item)})}/><input aria-label="课程全名" placeholder="全名" maxLength={120} value={course.name} onChange={e=>saveTimetable({...timetable,courses:timetable.courses.map((item,i)=>i===index?{...item,name:e.target.value}:item)})}/><input type="color" aria-label="图例颜色" value={course.color} onChange={e=>saveTimetable({...timetable,courses:timetable.courses.map((item,i)=>i===index?{...item,color:e.target.value.toUpperCase()}:item)})}/><button type="button" className="icon-button" aria-label="删除图例" onClick={()=>saveTimetable({...timetable,courses:timetable.courses.filter((_,i)=>i!==index)})}><Trash2 size={15}/></button></div>)}</div><button className="secondary" onClick={()=>saveTimetable({...timetable,courses:[...timetable.courses,{code:'',name:'',color:'#3B7DDD'}]})}><Plus size={15}/>添加图例</button></details></div>
       <div className="settings-section"><h3><CalendarDays size={17}/>假日显示</h3><p>日期格显示中国法定节假日的“休/班”和节日名称，以及德国全国性法定假日（蓝色“德”标记）。德国各州假日不同，选择所在州后会加上该州的假日。</p><label className="setting-row">德国联邦州<select aria-label="德国联邦州" value={germanState} onChange={e=>{const value=e.target.value as GermanState;setGermanState(value);try{localStorage.setItem('shiri-de-state',value);}catch{toast('联邦州设置未能保存');}}}>{GERMAN_STATES.map(([code,label])=><option key={code} value={code}>{code?`${label}（${code}）`:label}</option>)}</select></label></div>
-      <div className="settings-section"><h3><Bell size={17}/>日程提醒</h3><label className="setting-row">开启日程提醒<input type="checkbox" checked={reminders} onChange={async e=>{const enabled=e.target.checked;if(!enabled||await enableNotifications()){setReminders(enabled);localStorage.setItem('shiri-reminders',String(enabled));}else toast('通知权限未开启，请在系统设置中允许通知');}}/></label><label className="setting-row">提醒时间<select aria-label="提醒时间" value={reminderLead} onChange={e=>{const value=e.target.value;setReminderLead(value);try{localStorage.setItem('shiri-reminder-leads',value);}catch{toast('提醒时间未能保存');}}}>{REMINDER_OPTIONS.map(value=><option key={value} value={value}>{value==='multi'?'提前 2 小时、1 小时、30 分钟、10 分钟':value==='0'?'开始时':`只提前 ${leadLabel(Number(value))}`}</option>)}</select></label><p>Windows 到点在屏幕右下角弹出提醒，可以点“10 分钟后再提醒”；关闭窗口后在托盘继续提醒；退出软件或电脑关机后不提醒。iPhone 原生版预排未来 30 天内最近 60 条提醒，打开应用时更新。网页版需要保持页面运行。</p></div>
+      <div className="settings-section"><h3><Scale size={17}/>体重</h3><WeightChart weights={data.weights} today={today} compact/><div className="backup-buttons"><button className="secondary" onClick={()=>{setSettings(false);setSection('weight');}}>打开体重记录</button></div></div>
+      <div className="settings-section"><h3><Bell size={17}/>日程提醒</h3><label className="setting-row">开启日程提醒<input type="checkbox" checked={reminders} onChange={async e=>{const enabled=e.target.checked;if(!enabled||await enableNotifications()){setReminders(enabled);localStorage.setItem('shiri-reminders',String(enabled));}else toast('通知权限未开启，请在系统设置中允许通知');}}/></label><label className="setting-row">提醒时间<select aria-label="提醒时间" value={reminderLead} onChange={e=>{const value=e.target.value;setReminderLead(value);try{localStorage.setItem('shiri-reminder-leads',value);}catch{toast('提醒时间未能保存');}}}>{REMINDER_OPTIONS.map(value=><option key={value} value={value}>{value==='multi'?'提前 2 小时、1 小时、10 分钟':value==='0'?'开始时':`只提前 ${leadLabel(Number(value))}`}</option>)}</select></label><label className="setting-row">完成的日程放到当天最下面（不再显示时间）<input type="checkbox" checked={doneBottom} onChange={e=>{const enabled=e.target.checked;setDoneBottom(enabled);try{localStorage.setItem('shiri-done-bottom',enabled?'1':'0');}catch{toast('设置未能保存');}}}/></label><label className="setting-row">每天 {WEIGHT_TIME} 还没记体重时提醒<input type="checkbox" checked={weightReminder} onChange={e=>{const enabled=e.target.checked;setWeightReminder(enabled);try{localStorage.setItem('shiri-weight-reminder',enabled?'1':'0');}catch{toast('体重提醒设置未能保存');}}}/></label><label className="setting-row">周五 {GOAL_REMINDER_TIME} 周次任务还差 2 次及以上时提醒<input type="checkbox" checked={goalReminder} onChange={e=>{const enabled=e.target.checked;setGoalReminder(enabled);try{localStorage.setItem('shiri-goal-reminder',enabled?'1':'0');}catch{toast('周次任务提醒设置未能保存');}}}/></label><label className="setting-row">每周日 {REVIEW_REMINDER_TIME} 提醒看本周复盘汇总<input type="checkbox" checked={reviewReminder} onChange={e=>{const enabled=e.target.checked;setReviewReminder(enabled);try{localStorage.setItem('shiri-review-reminder',enabled?'1':'0');}catch{toast('复盘提醒设置未能保存');}}}/></label><label className="setting-row">每天 {JOURNAL_REMINDER_TIME} 还没写日记时提醒<input type="checkbox" checked={journalReminder} onChange={e=>{const enabled=e.target.checked;setJournalReminder(enabled);try{localStorage.setItem('shiri-journal-reminder',enabled?'1':'0');}catch{toast('日记提醒设置未能保存');}}}/></label><p>Windows 到点在屏幕右下角弹出提醒，可以点“10 分钟后再提醒”；关闭窗口后在托盘继续提醒；退出软件或电脑关机后不提醒。iPhone 原生版预排未来 30 天内最近 60 条提醒，打开应用时更新。网页版需要保持页面运行。</p></div>
       <div className="settings-section"><h3><Cloud size={17}/>电脑与 iPhone 同步 <span className="small-pill">可选</span></h3><p>使用托管 Supabase 项目，不需要自己购买服务器。当前{user?`登录为 ${user.email}`:'尚未登录账号，数据仅在这台设备'}。</p><details open={!cloudConfigured}><summary>连接云项目</summary><label>项目 URL<input type="url" placeholder="https://你的项目.supabase.co" value={cloudUrl} onChange={e=>setCloudUrl(e.target.value)}/></label><label>Publishable / anon key<input type="text" autoComplete="off" placeholder="项目公开客户端密钥" value={cloudKey} onChange={e=>setCloudKey(e.target.value)}/></label><p className="minor">先在云项目执行随软件提供的 cloud/schema.sql。这里只填写公开客户端密钥，不能填写 service_role 密钥。</p><button className="secondary" disabled={!!user} onClick={()=>{try{const next=createCloudClient(cloudUrl.trim(),cloudKey.trim());localStorage.setItem('shiri-cloud-url',cloudUrl.trim());localStorage.setItem('shiri-cloud-key',cloudKey.trim());setClient(next);setCloudConfigured(true);toast('云连接配置已保存，请登录后验证同步');}catch(e){toast(cloudErrorMessage(e));}}}>保存连接配置</button>{user&&<p className="minor">更换云项目之前请先退出账号。</p>}</details>
-      {user?<><div className="account-row"><div className="avatar">我</div><div><strong>{user.email}</strong><small>{syncState}</small></div><button className="icon-button" title="立即同步" onClick={()=>void runSync()}><RefreshCw size={17}/></button><button className="icon-button" title="退出账号" onClick={async()=>{const result=await client?.auth.signOut({scope:'local'});if(result?.error)toast(cloudErrorMessage(result.error));else toast('已退出，切换回本机空间');}}><LogOut size={17}/></button></div><div className="account-actions"><button className="secondary" onClick={()=>void migrateLocal()}>将本机任务合并到此账号</button><button className="secondary" onClick={()=>setChangingPassword(value=>!value)}>{changingPassword?'取消修改':'修改密码'}</button></div>{changingPassword&&<form className="password-change" onSubmit={e=>{e.preventDefault();void saveNewPassword();}}><label>新密码<input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="至少 8 位字符"/></label><label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} placeholder="再次输入新密码"/></label><button className="primary" type="submit" disabled={busy||newPassword.length<8||confirmPassword.length<8}>保存新密码</button><p className="minor">修改密码不会改变账号，也不会删除电脑、手机或云端日程。</p></form>}</>:<div className="auth-form"><label>邮箱<input type="email" autoComplete="username" value={email} onChange={e=>{setEmail(e.target.value);setResetOffer('');}} placeholder="you@example.com"/></label><label>密码<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="至少 8 位字符"/></label><div><button className="primary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('login')}>登录并同步</button><button className="secondary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('signup')}>注册账号</button></div><button className="auth-link" type="button" disabled={!client||busy||!email} onClick={()=>void sendPasswordReset()}>忘记密码？发送重置邮件</button>{resetOffer&&<div className="reset-offer" role="alert"><p>该邮箱已被注册。是否发送重置密码邮件？</p><div><button className="primary" type="button" disabled={busy} onClick={()=>void sendPasswordReset(resetOffer)}>发送重置邮件</button><button className="secondary" type="button" onClick={()=>setResetOffer('')}>暂不</button></div></div>}</div>}</div>
+      {user?<><div className="account-row"><div className="avatar">我</div><div><strong>{user.email}</strong><small>{syncLabel}</small></div><button className="icon-button" title="立即同步" onClick={()=>{if(syncLeader)void runSync();else requestLeaderSync();}}><RefreshCw size={17}/></button><button className="icon-button" title="退出账号" onClick={async()=>{const result=await client?.auth.signOut({scope:'local'});if(result?.error)toast(cloudErrorMessage(result.error));else toast('已退出，切换回本机空间');}}><LogOut size={17}/></button></div><div className="account-actions"><button className="secondary" onClick={()=>void migrateLocal()}>将本机任务合并到此账号</button><button className="secondary" onClick={()=>setChangingPassword(value=>!value)}>{changingPassword?'取消修改':'修改密码'}</button></div>{changingPassword&&<form className="password-change" onSubmit={e=>{e.preventDefault();void saveNewPassword();}}><label>新密码<input type="password" autoComplete="new-password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="至少 8 位字符"/></label><label>确认新密码<input type="password" autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} placeholder="再次输入新密码"/></label><button className="primary" type="submit" disabled={busy||newPassword.length<8||confirmPassword.length<8}>保存新密码</button><p className="minor">修改密码不会改变账号，也不会删除电脑、手机或云端日程。</p></form>}</>:<div className="auth-form"><label>邮箱<input type="email" autoComplete="username" value={email} onChange={e=>{setEmail(e.target.value);setResetOffer('');}} placeholder="you@example.com"/></label><label>密码<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="至少 8 位字符"/></label><div><button className="primary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('login')}>登录并同步</button><button className="secondary" disabled={!client||busy||!email||password.length<8} onClick={()=>void auth('signup')}>注册账号</button></div><button className="auth-link" type="button" disabled={!client||busy||!email} onClick={()=>void sendPasswordReset()}>忘记密码？发送重置邮件</button>{resetOffer&&<div className="reset-offer" role="alert"><p>该邮箱已被注册。是否发送重置密码邮件？</p><div><button className="primary" type="button" disabled={busy} onClick={()=>void sendPasswordReset(resetOffer)}>发送重置邮件</button><button className="secondary" type="button" onClick={()=>setResetOffer('')}>暂不</button></div></div>}</div>}</div>
       {user&&client&&<AiTokenSection client={client} userId={user.id} projectUrl={cloudUrl} toast={toast}/>}
       <div className="settings-section"><h3><Download size={17}/>数据备份</h3><p>导入采用合并方式。建议定期导出备份；不同账号拥有独立的本机空间。</p><div className="backup-buttons"><button className="secondary" onClick={downloadBackup}><Download size={15}/>导出 JSON 备份</button><button className="secondary" onClick={()=>importRef.current?.click()}><Upload size={15}/>导入并合并</button></div><input ref={importRef} type="file" accept=".json,application/json" hidden onChange={e=>void importBackup(e.target.files?.[0])}/></div>
       <div className="settings-section"><h3><Smartphone size={17}/>iPhone 使用</h3><p>在 iPhone 的 Safari 打开 https://yuquanzhao9.github.io/yushi-app/ ，点分享 →「添加到主屏幕」，用同一账号登录即可同步；在“我的”里开启提醒后，到点由云端推送。</p></div>
       <div className="about">昱时 <span>0.1.2 · 把日子安排好</span></div>
     </div></section></div>}
     {message&&<div className="toast" role="status"><Check size={17}/>{message}{undo&&message==='任务已删除'&&<button onClick={()=>{updateTask({...undo,deletedAt:undefined},true);setUndo(null);toast('已恢复任务');}}>撤销</button>}<button aria-label="关闭提示" onClick={()=>setMessage('')}><X size={15}/></button></div>}
+  </div>;
+}
+
+/** 当天日记：边写边存（停顿片刻或离开输入框时保存），切换日期也会先存好。 */
+function JournalEditor({date,text,focus,onSave,onCount,flushRef,className='journal-editor',placeholder='写点这一天的事、心情或想法…（自动保存，只有你能看到）'}:{date:string;text:string;focus:number;onSave:(date:string,text:string)=>void;onCount?:(count:number)=>void;flushRef?:React.MutableRefObject<()=>void>;className?:string;placeholder?:string}){
+  const [draft,setDraft]=useState(()=>spaceParagraphs(text));
+  const pending=useRef<string|null>(null);
+  const save=useRef(onSave);save.current=onSave;
+  const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const box=useRef<HTMLTextAreaElement>(null);
+  const flush=useCallback(()=>{clearTimeout(timer.current);if(pending.current!==null){const value=pending.current;pending.current=null;save.current(date,value);}},[date]);
+  useEffect(()=>{if(pending.current===null)setDraft(spaceParagraphs(text));},[text]);
+  useEffect(()=>flush,[flush]);
+  useEffect(()=>{if(flushRef)flushRef.current=flush;},[flush,flushRef]);
+  useEffect(()=>{onCount?.(journalLength(draft));},[draft,onCount]);
+  const change=(value:string)=>{setDraft(value);pending.current=value;clearTimeout(timer.current);timer.current=setTimeout(flush,700);};
+  const lastFocus=useRef(0);
+  useEffect(()=>{if(focus&&focus!==lastFocus.current){lastFocus.current=focus;const element=box.current;if(element){element.focus();element.setSelectionRange(element.value.length,element.value.length);element.scrollIntoView({block:'nearest'});}}},[focus]);
+  return <textarea ref={box} className={className} aria-label={`${date} 的日记`} placeholder={placeholder} maxLength={JOURNAL_MAX_TEXT} value={draft} onKeyDown={e=>handleParagraphEnter({key:e.key,shiftKey:e.shiftKey,isComposing:e.nativeEvent.isComposing,keyCode:e.keyCode,preventDefault:()=>e.preventDefault(),currentTarget:e.currentTarget},change)} onChange={e=>change(e.target.value)} onBlur={flush}/>;
+}
+
+function JournalList({journal,today,onOpen}:{journal:AppData['journal'];today:string;onOpen:(date:string)=>void}){
+  const entries=writtenEntries(journal);
+  const label=(key:string)=>new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'short'}).format(parseDate(key));
+  return <div className="list-view journal-list"><div className="list-view-title"><h2>全部日记</h2><span>{entries.length} 篇</span><button className="secondary journal-today" onClick={()=>onOpen(today)}><Plus size={14}/>{hasJournal(journal,today)?'打开今天的日记':'写今天的日记'}</button></div>
+    {entries.map(entry=><button key={entry.date} className="journal-item" onClick={()=>onOpen(entry.date)}><strong>{label(entry.date)}</strong><p>{entry.text.trim()}</p></button>)}
+    {!entries.length&&<div className="empty-state"><BookOpen size={34}/><h3>还没有日记</h3><p>点一个日期，在右侧“日记”里写下这一天。</p></div>}
   </div>;
 }
 
@@ -480,12 +747,78 @@ function ColorSwatches({value,fallback,onChange}:{value?:string;fallback?:string
 
 /** Shows every event that fits in the cell; "还有 N 项" only for the ones that really do not. */
 /** The timed part of a date cell; entries too short for a line of text show as plain color bars. */
+// 日期格里“放不放得下”的测量，所有格子合在一起分步做：先统一读、再统一改、再统一读……
+// 以前每个格子、每一条日程都是改一下样式马上读一次尺寸，浏览器每读一次都要重新排版整页，
+// 日程多时翻一页要排版上百次，这是桌面日历翻页、改日程时发卡的主要原因之一。
+// 步骤下标对齐：0 读格子高度，1 改样式，2 读，3 改，4 读，5 改。
+type MeasureStep=(()=>void)|null;
+const measureQueue=new Map<object,MeasureStep[]>();
+// “还有 N 项”的数字要在这一帧画出来之前更新，测完后一起同步渲染，不会先闪一下旧数字。
+const measureUpdates:(()=>void)[]=[];
+function queueMeasure(owner:object,steps:MeasureStep[]){
+  if(!measureQueue.size)queueMicrotask(flushMeasure);
+  measureQueue.set(owner,steps);
+}
+function flushMeasure(){
+  const jobs=[...measureQueue.values()];measureQueue.clear();
+  const depth=Math.max(0,...jobs.map(job=>job.length));
+  for(let step=0;step<depth;step++)for(const job of jobs)job[step]?.();
+  const updates=measureUpdates.splice(0);
+  if(updates.length)flushSync(()=>{for(const update of updates)update();});
+}
+
 function CellHours({children}:{children:ReactNode}){
   const box=useRef<HTMLDivElement>(null);
-  const measure=useCallback(()=>{const element=box.current;if(!element)return;for(const item of Array.from(element.children) as HTMLElement[])item.classList.toggle('bar',item.offsetHeight<12);},[]);
+  const measure=useCallback(()=>{
+    const element=box.current;if(!element)return;
+    let short:[HTMLElement,boolean][]=[];
+    // 在其他测量改完样式之后读（第 4 步），太矮放不下一行字的画成色条。
+    queueMeasure(element,[null,null,null,null,
+      ()=>{short=(Array.from(element.children) as HTMLElement[]).filter(item=>item.classList.contains('calendar-event')).map(item=>[item,item.offsetHeight<12]);},
+      ()=>{for(const [item,bar] of short)item.classList.toggle('bar',bar);}]);
+  },[]);
   useLayoutEffect(()=>{measure();});
   useEffect(()=>{const element=box.current;if(!element)return;const observer=new ResizeObserver(()=>measure());observer.observe(element);return()=>observer.disconnect();},[measure]);
   return <div className="cell-hours" ref={box}>{children}</div>;
+}
+
+/** 7 天视图日期格左边的时间刻度：6–20 点每小时一格（小格每 2 小时标一次），0–6、20–24 各压成一格。 */
+function CellAxis({big}:{big:boolean}){
+  const marks:{label:string;at:number}[]=[{label:'0',at:0},...Array.from({length:15},(_,i)=>6+i).filter(h=>big||h%2===0).map(h=>({label:String(h),at:h*60})),{label:'24',at:1440}];
+  return <div className="cell-axis" aria-hidden="true">{marks.map(mark=><span key={mark.at} style={{top:`${dayFraction(mark.at)*100}%`}}>{big?`${String(mark.label).padStart(2,'0')}:00`:mark.label}</span>)}</div>;
+}
+
+/** 每天格子底部固定高度的完成栏：完成的日程缩成小标签，放不下的收成 +N（停上去看全部）。 */
+function DoneBar({children}:{children:ReactNode}){
+  const box=useRef<HTMLDivElement>(null);
+  const [hidden,setHidden]=useState<string[]>([]);
+  const measure=useCallback(()=>{
+    const element=box.current;if(!element)return;
+    let parentHeight=0,limit=0,bottoms:number[]=[];
+    const items=Array.from(element.querySelectorAll<HTMLElement>(':scope>.calendar-event'));
+    const more=element.querySelector<HTMLElement>(':scope>.done-more');
+    queueMeasure(element,[
+      ()=>{parentHeight=element.parentElement?.clientHeight??0;},
+      ()=>{
+        // 固定 6–7 行高，格子太矮时最多占四成。
+        element.style.height=parentHeight?`${Math.min(118,Math.max(36,Math.floor(parentHeight*0.4)))}px`:'';
+        for(const item of items)item.style.display='';
+        if(more)more.style.display='none';
+      },
+      ()=>{limit=element.getBoundingClientRect().bottom;bottoms=items.map(item=>item.getBoundingClientRect().bottom);},
+      ()=>{
+        // 放不下时留一行给 +N（行高 15、间距 2），前面能放几条放几条。
+        let fit=items.length;
+        if(bottoms.some(bottom=>bottom>limit+0.5)){fit=0;while(fit<items.length&&bottoms[fit]+17<=limit+0.5)fit++;}
+        items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
+        if(more)more.style.display=fit<items.length?'':'none';
+        const names=items.slice(fit).map(item=>item.querySelector('span')?.textContent||'');
+        measureUpdates.push(()=>setHidden(previous=>JSON.stringify(previous)===JSON.stringify(names)?previous:names));
+      }]);
+  },[]);
+  useLayoutEffect(()=>{measure();});
+  useEffect(()=>{const element=box.current;if(!element)return;const observer=new ResizeObserver(()=>measure());observer.observe(element);return()=>observer.disconnect();},[measure]);
+  return <div className="done-bar" ref={box} aria-label="已完成">{children}<span className="done-more" style={{display:'none'}} title={`还有已完成：${hidden.join('、')}`}>+{hidden.length}</span></div>;
 }
 
 function CellTasks({children,onMore}:{children:ReactNode;onMore:()=>void}){
@@ -495,18 +828,27 @@ function CellTasks({children,onMore}:{children:ReactNode;onMore:()=>void}){
     const element=box.current;if(!element)return;
     const items=Array.from(element.querySelectorAll<HTMLElement>(':scope>.calendar-event'));
     const more=element.querySelector<HTMLElement>(':scope>.more-events');
-    for(const item of items)item.style.display='';
-    if(more)more.style.display='none';
-    const top=element.getBoundingClientRect().top,limit=element.clientHeight;
-    const bottom=(item:HTMLElement)=>item.getBoundingClientRect().bottom-top;
-    let fit=items.length;
-    if(items.length&&bottom(items[items.length-1])>limit+0.5){
-      const reserve=(more?.offsetHeight||14)+3;
-      fit=0;while(fit<items.length&&bottom(items[fit])<=limit-reserve)fit++;
-    }
-    items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
-    if(more)more.style.display=fit<items.length?'':'none';
-    setHidden(items.length-fit);
+    let parentHeight=0,compact=false,limit=0,bottoms:number[]=[];
+    queueMeasure(element,[
+      ()=>{parentHeight=element.parentElement?.clientHeight??0;},
+      ()=>{
+        for(const item of items)item.style.display='';
+        if(more)more.style.display='none';
+        // 没定时间的最多占格子的三分之一，给时间轴留地方。
+        if(parentHeight)element.style.maxHeight=`${Math.max(40,Math.floor(parentHeight*0.34))}px`;
+        element.classList.remove('compact');
+      },
+      // 放不下时先换成紧凑的一行行显示，还放不下才收起后面的。
+      ()=>{compact=items.length>0&&element.scrollHeight>element.clientHeight+0.5;},
+      ()=>{if(compact)element.classList.add('compact');},
+      ()=>{const top=element.getBoundingClientRect().top;limit=element.clientHeight;bottoms=items.map(item=>item.getBoundingClientRect().bottom-top);},
+      ()=>{
+        let fit=items.length;
+        if(items.length&&bottoms[items.length-1]>limit+0.5){const reserve=14+3;fit=0;while(fit<items.length&&bottoms[fit]<=limit-reserve)fit++;}
+        items.forEach((item,index)=>{item.style.display=index<fit?'':'none';});
+        if(more)more.style.display=fit<items.length?'':'none';
+        measureUpdates.push(()=>setHidden(items.length-fit));
+      }]);
   },[]);
   useLayoutEffect(()=>{measure();});
   useEffect(()=>{const element=box.current;if(!element)return;const observer=new ResizeObserver(()=>measure());observer.observe(element);return()=>observer.disconnect();},[measure]);
@@ -518,8 +860,8 @@ function TimetableStrip({timetable,today}:{timetable:Timetable;today:string}){
   const weekday=(parseDate(today).getDay()+6)%7+1;
   const short=(key:string)=>`${Number(key.slice(5,7))}/${Number(key.slice(8,10))}`;
   return <section className="timetable-strip" aria-label="课表">
-    {[1,2,3,4,5].map(day=>{const slots=slotsForWeekday(timetable,day);return <div key={day} className={`timetable-day ${inTerm&&day===weekday?'today':''}`}>{slots.map(slot=><div key={slot.id} className={`timetable-slot ${slot.dashed?'dashed':''}`} style={{'--slot-color':slot.color} as React.CSSProperties} title={`${slot.start}–${slot.end} ${slot.title}${slot.note?` · ${slot.note}`:''}`}><small>{slot.start}</small><span>{slot.title||'未命名'}</span></div>)}{!slots.length&&<em>无课</em>}</div>;})}
-    <div className="timetable-legend"><strong>课表 · {timetable.name}<small>{short(timetable.start)}–{short(timetable.end)}{inTerm?'':today<timetable.start?' · 未开学':' · 已结束'}</small></strong>{timetable.courses.map((course,index)=><span key={index} title={course.name}><i style={{background:course.color}}/>{course.code} {course.name}</span>)}</div>
+    {[1,2,3,4,5].map(day=>{const slots=weekGridSlots(timetable,day);return <div key={day} className={`timetable-day ${inTerm&&day===weekday?'today':''}`}>{slots.map(slot=><div key={slot.id} className={`timetable-slot ${slot.dashed?'dashed':''}`} style={{'--slot-color':slot.color} as React.CSSProperties} title={`${slot.start}–${slot.end} ${slot.title}${slot.note?` · ${slot.note}`:''}`}><small>{slot.start}</small><span>{slot.title||'未命名'}</span></div>)}{!slots.length&&<em>无课</em>}</div>;})}
+    <div className="timetable-legend"><strong>课表 · {timetable.name}<small>{short(timetable.start)}–{short(timetable.end)}{inTerm?'':today<timetable.start?' · 未开学':' · 已结束'}</small></strong>{timetable.courses.map((course,index)=><span key={index} title={course.name}><i style={{background:course.color}}/>{course.code} {course.name}</span>)}{oneOffSlots(timetable,today).slice(0,4).map(slot=><span key={slot.id} className="timetable-once" title={`${slot.from} ${slot.start}–${slot.end} ${slot.title}${slot.note?` · ${slot.note}`:''}`}><i style={{background:slot.color}}/>{short(slot.from!)} {slot.start} {slot.title}</span>)}</div>
   </section>;
 }
 

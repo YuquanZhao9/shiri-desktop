@@ -71,12 +71,56 @@ test('快速添加识别开头的时间', async () => {
   assert.deepEqual(parseQuick('25:00 错'), { title: '25:00 错', time: '' });
 });
 
-test('cloud push reminds 2 h, 1 h, 30 min and 10 min before, once each', () => {
+test('cloud push reminds 2 h, 1 h and 10 min before, once each (no 30 min)', () => {
   const task = { id: 'multi', title: '多次提醒', date: '2026-09-14', time: '12:00', repeat: 'none', completed: false, doneDates: [] };
   const at = zonedTime('2026-09-14', '12:00', 'Europe/Berlin');
-  const fired = [120, 60, 30, 10].map(lead => dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - lead * 60_000));
-  assert.deepEqual(fired.map(due => due.length), [1, 1, 1, 1]);
-  assert.equal(new Set(fired.map(due => due[0].occurrence)).size, 4);
+  const fired = [120, 60, 10].map(lead => dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - lead * 60_000));
+  assert.deepEqual(fired.map(due => due.length), [1, 1, 1]);
+  assert.equal(new Set(fired.map(due => due[0].occurrence)).size, 3);
+  assert.equal(dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - 30 * 60_000).length, 0, 'no 30-minute push');
   assert.match(fired[0][0].body, /2 小时后开始/);
   assert.equal(dueReminders([task], 'Europe/Berlin', MULTI_LEADS, at - 45 * 60_000).length, 0);
+});
+
+test('云端 21:00 日记推送：按用户时区到点、没写才推', async () => {
+  const { journalDue, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const nine = zt('2026-10-11', '21:00', 'Europe/Berlin');
+  const due = journalDue('Europe/Berlin', nine, () => false);
+  assert.equal(due?.occurrence, 'journal:2026-10-11:21:00');
+  assert.equal(due?.occurrence.split(':')[1], '2026-10-11');
+  assert.equal(journalDue('Europe/Berlin', nine, () => true), null);
+  assert.equal(journalDue('Europe/Berlin', nine - 60 * 60_000, () => false), null);
+  assert.equal(journalDue('Europe/Berlin', nine + 20 * 60_000, () => false), null);
+  assert.equal(nine, Date.parse('2026-10-11T19:00:00.000Z'));
+});
+
+test('云端周日 20:00 复盘推送：只在周日到点', async () => {
+  const { reviewDue, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const sunday = zt('2026-10-18', '20:00', 'Europe/Berlin');
+  const due = reviewDue('Europe/Berlin', sunday);
+  assert.equal(due?.start, '2026-10-12');
+  assert.equal(due?.end, '2026-10-18');
+  assert.equal(due?.due.occurrence, 'review:2026-10-18:20:00');
+  assert.equal(reviewDue('Europe/Berlin', zt('2026-10-17', '20:00', 'Europe/Berlin')), null);
+  assert.equal(reviewDue('Europe/Berlin', sunday + 30 * 60_000), null);
+});
+
+test('云端周五 19:00 周次任务提醒：只提醒还差 2 次及以上的', async () => {
+  const { goalDue, goalWindow, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const friday = zt('2026-10-16', '19:00', 'Europe/Berlin');
+  const window = goalWindow('Europe/Berlin', friday);
+  assert.deepEqual(window && [window.start, window.end], ['2026-10-12', '2026-10-18']);
+  assert.equal(goalWindow('Europe/Berlin', zt('2026-10-15', '19:00', 'Europe/Berlin')), null);
+  const goals = [{ id: 'gym', name: '健身', target: 3 }, { id: 'de', name: '德语学习', target: 2 }];
+  const marks = [{ goalId: 'de', date: '2026-10-13', done: true }, { goalId: 'gym', date: '2026-10-11', done: true }];
+  assert.equal(goalDue(goals, marks, window!)?.body, '健身还差 3 次，周末安排一下吧');
+  assert.equal(goalDue(goals.slice(1), marks, window!), null);
+});
+
+test('云端 08:00 测体重推送：按用户时区到点', async () => {
+  const { weightDue, zonedTime: zt } = await import('../supabase/functions/shiri-reminders/schedule.ts');
+  const eight = zt('2026-10-17', '08:00', 'Europe/Berlin');
+  assert.equal(weightDue('Europe/Berlin', eight)?.day, '2026-10-17');
+  assert.equal(weightDue('Europe/Berlin', eight)?.due.occurrence, 'weight:2026-10-17:08:00');
+  assert.equal(weightDue('Europe/Berlin', eight + 30 * 60_000), null);
 });

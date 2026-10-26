@@ -1,6 +1,13 @@
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import type { TaskList, Timetable } from './types';
+import type { JournalEntry, Reflection, TaskList, Timetable } from './types';
+import { mergeReflections, newerReflection, validateReflection } from './reflections';
+import { mergeItems, newerItem, validateGoal, validateMark } from './weekly';
+import type { ClassMark, GoalMark, WeeklyGoal, WeightEntry } from './types';
+import { validateClassMark } from './classes';
+import { validateWeight } from './weight';
 import { validateTimetable } from './timetable';
+import { mergeJournal, newerEntry, validateJournalEntry } from './journal';
+import { sameContent } from './stable-json';
 
 // 清单、课表同步与实时推送，电脑版和 iPhone 网页版共用。
 // 云端需先运行 cloud/schema-v2.sql、schema-v3.sql；没运行时对应部分自动跳过，日程同步不受影响。
@@ -79,12 +86,110 @@ export async function syncTimetable(client: SupabaseClient, userId: string, loca
   return remote ?? local;
 }
 
+/**
+ * 日记同步：云端每天一行，较新的 updatedAt 为准（同 src/journal.ts newerEntry）。
+ * 只上传本机比云端新的；返回本机与云端合并后的日记，调用方再用 mergeJournal 并入同步期间的新改动。
+ * 云端没建日记表（schema-v5.sql）或读取失败时返回 null，本机保持不变。
+ */
+export async function syncJournal(client: SupabaseClient, userId: string, local: JournalEntry[] = []): Promise<JournalEntry[] | null> {
+  const remote: JournalEntry[] = [];
+  for (let start = 0; ; start += 500) {
+    const { data, error } = await client.from('shiri_journal').select('payload').eq('user_id', userId).order('day').range(start, start + 499);
+    if (error) return null;
+    for (const row of (data || []) as { payload: unknown }[]) { try { remote.push(validateJournalEntry(row.payload)); } catch { /* 跳过损坏的一行 */ } }
+    if (!data || data.length < 500) break;
+  }
+  const push = journalToPush(local, remote);
+  for (let start = 0; start < push.length; start += 200) {
+    const { error } = await client.rpc('merge_journal', { incoming: push.slice(start, start + 200), expected_user: userId });
+    if (error) return null;
+  }
+  return mergeJournal(local, remote);
+}
+
+/**
+ * 复盘同步：云端每条一行，较新的为准（同 src/reflections.ts newerReflection）。
+ * 云端没建复盘表（schema-v6.sql）或读取失败时返回 null。
+ */
+export async function syncReflections(client: SupabaseClient, userId: string, local: Reflection[] = []): Promise<Reflection[] | null> {
+  const remote: Reflection[] = [];
+  for (let start = 0; ; start += 500) {
+    const { data, error } = await client.from('shiri_reflections').select('payload').eq('user_id', userId).order('id').range(start, start + 499);
+    if (error) return null;
+    for (const row of (data || []) as { payload: unknown }[]) { try { remote.push(validateReflection(row.payload)); } catch { /* 跳过损坏的一行 */ } }
+    if (!data || data.length < 500) break;
+  }
+  const push = reflectionsToPush(local, remote);
+  for (let start = 0; start < push.length; start += 200) {
+    const { error } = await client.rpc('merge_reflections', { incoming: push.slice(start, start + 200), expected_user: userId });
+    if (error) return null;
+  }
+  return mergeReflections(local, remote);
+}
+
+/**
+ * 周次任务同步：任务和打卡都放在 shiri_weekly 表，每条一行（kind = goal / mark），较新的为准。
+ * 云端没建表（schema-v7.sql）或读取失败时返回 null。
+ */
+export async function syncWeekly(client: SupabaseClient, userId: string, goals: WeeklyGoal[] = [], marks: GoalMark[] = [], classMarks: ClassMark[] = [], weights: WeightEntry[] = []): Promise<{ goals: WeeklyGoal[]; marks: GoalMark[]; classMarks: ClassMark[]; weights: WeightEntry[] } | null> {
+  const remoteGoals: WeeklyGoal[] = [], remoteMarks: GoalMark[] = [], remoteClasses: ClassMark[] = [], remoteWeights: WeightEntry[] = [];
+  for (let start = 0; ; start += 500) {
+    const { data, error } = await client.from('shiri_weekly').select('kind,payload').eq('user_id', userId).order('id').range(start, start + 499);
+    if (error) return null;
+    for (const row of (data || []) as { kind: string; payload: unknown }[]) {
+      try { if (row.kind === 'goal') remoteGoals.push(validateGoal(row.payload)); else if (row.kind === 'class') remoteClasses.push(validateClassMark(row.payload)); else if (row.kind === 'weight') remoteWeights.push(validateWeight(row.payload)); else remoteMarks.push(validateMark(row.payload)); } catch { /* 跳过损坏的一行 */ }
+    }
+    if (!data || data.length < 500) break;
+  }
+  const newer = <T extends { id: string; updatedAt: string; deletedAt?: string }>(local: T[], remote: T[]) => itemsToPush(local, remote, newerItem);
+  const push = [...newer(goals, remoteGoals).map(item => ({ kind: 'goal', item })), ...newer(marks, remoteMarks).map(item => ({ kind: 'mark', item })), ...newer(classMarks, remoteClasses).map(item => ({ kind: 'class', item })), ...newer(weights, remoteWeights).map(item => ({ kind: 'weight', item }))];
+  for (let start = 0; start < push.length; start += 200) {
+    const { error } = await client.rpc('merge_weekly', { incoming: push.slice(start, start + 200), expected_user: userId });
+    if (error) return null;
+  }
+  return { goals: mergeItems(goals, remoteGoals), marks: mergeItems(marks, remoteMarks), classMarks: mergeItems(classMarks, remoteClasses), weights: mergeItems(weights, remoteWeights) };
+}
+
+type Versioned = { id: string; updatedAt: string; deletedAt?: string };
+const revisionOf = (item: Versioned) => item.deletedAt && item.deletedAt > item.updatedAt ? item.deletedAt : item.updatedAt;
+
+/**
+ * 要上传的条目：云端没有的，或本机按规则胜出且内容确实不同的（按内容比，不看字段顺序，
+ * 否则云端返回的字段顺序不同会让同样的数据每次都重传）。
+ * 时间戳一样、内容不同时（例如两台设备各自自动排了同一节周次任务），云端只认更新的时间戳，
+ * 会一直留着自己那份，两台设备就永远各显示一套。所以本机胜出时把 updatedAt 往后推 1 毫秒再传，
+ * 云端收下后所有设备都会换成这一份。
+ */
+export function itemsToPush<T extends Versioned>(local: T[], remote: T[], newer: (a: T, b: T) => T): T[] {
+  const byId = new Map(remote.map(item => [item.id, item]));
+  return local.flatMap(item => {
+    const other = byId.get(item.id);
+    if (!other) return [item];
+    if (sameContent(item, other) || newer(item, other) !== item) return [];
+    if (revisionOf(item) !== revisionOf(other)) return [item];
+    return [{ ...item, updatedAt: new Date(Date.parse(revisionOf(item)) + 1).toISOString() }];
+  });
+}
+
+export function reflectionsToPush(local: Reflection[], remote: Reflection[]): Reflection[] {
+  return itemsToPush(local, remote, newerReflection);
+}
+
+/** 本机比云端新的日记（云端没有的也算）。 */
+export function journalToPush(local: JournalEntry[], remote: JournalEntry[]): JournalEntry[] {
+  const remoteByDate = new Map(remote.map(entry => [entry.date, entry]));
+  return local.filter(entry => { const other = remoteByDate.get(entry.date); return !other || newerEntry(entry, other) === entry && !sameContent(entry, other); });
+}
+
 /** 另一台设备改了日程或清单时立即通知；手机从后台回来时由调用方再补一次同步。 */
 export function subscribeLive(client: SupabaseClient, userId: string, onChange: () => void): () => void {
   const channel: RealtimeChannel = client.channel(`shiri-live-${userId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_tasks', filter: `user_id=eq.${userId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_lists', filter: `user_id=eq.${userId}` }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_timetable', filter: `user_id=eq.${userId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_journal', filter: `user_id=eq.${userId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_reflections', filter: `user_id=eq.${userId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'shiri_weekly', filter: `user_id=eq.${userId}` }, onChange)
     .subscribe();
   return () => { void client.removeChannel(channel); };
 }

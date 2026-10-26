@@ -79,10 +79,103 @@ export interface Timetable {
   updatedAt: string;
 }
 
+/** One diary page per day, plain text. An empty text marks a deleted entry so the deletion syncs. */
+export interface JournalEntry {
+  date: string;
+  text: string;
+  updatedAt: string;
+}
+
+/** One reflection (复盘): a short note; Enter adds the next one. Deletions keep a tombstone so they sync. */
+export interface Reflection {
+  id: string;
+  date: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** A weekly-quota task (周次任务): do it `target` times a week, on any days, out of `slots` boxes. */
+export interface WeeklyGoal {
+  id: string;
+  name: string;
+  color: string;
+  target: number;
+  slots: number;
+  /** Length of one session in minutes (default 60). */
+  duration?: number;
+  /** Preferred start time (HH:mm) when sessions are placed automatically. */
+  time?: string;
+  /** Window for automatic placement (HH:mm); defaults 09:00–21:00. */
+  earliest?: string;
+  latest?: string;
+  /** Weekdays sessions may be placed on (1 = Monday … 7 = Sunday); all when absent. */
+  days?: number[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** One session of a weekly goal on a date: done, or planned for that day. */
+export interface GoalMark {
+  id: string;
+  goalId: string;
+  date: string;
+  done: boolean;
+  /** Start time (HH:mm) when the session is scheduled; untimed otherwise. */
+  time?: string;
+  /** Minutes; defaults to the goal's duration. */
+  duration?: number;
+  /** Placed automatically and not touched since; re-planning may move it. */
+  auto?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** 已上 / 未上 / 待复习. */
+export type ClassStatus = 'done' | 'todo' | 'review';
+
+/** Status and note of one class on one date (a timetable slot's occurrence). */
+export interface ClassMark {
+  id: string;
+  slotId: string;
+  date: string;
+  /** Course title when it was marked, so the review list still reads well if the timetable changes. */
+  title: string;
+  status: ClassStatus;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
+/** Morning weight for one date (测体重); a deletion keeps a tombstone so it syncs. */
+export interface WeightEntry {
+  id: string;
+  date: string;
+  kg: number;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+}
+
 export interface AppData {
   version: 1;
   tasks: Task[];
   lists: TaskList[];
   /** Weekly class timetable; absent until the user saves one (a default is shown). */
   timetable?: Timetable;
+  /** Diary pages; absent until the first one is written. */
+  journal?: JournalEntry[];
+  /** Reflections (复盘); absent until the first one. */
+  reflections?: Reflection[];
+  /** Weekly-quota tasks and their sessions; absent until the first one. */
+  goals?: WeeklyGoal[];
+  goalMarks?: GoalMark[];
+  /** Per-date class status (已上 / 未上 / 待复习) and notes. */
+  classMarks?: ClassMark[];
+  /** Daily 08:00 weight (测体重). */
+  weights?: WeightEntry[];
 }

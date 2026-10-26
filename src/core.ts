@@ -1,5 +1,10 @@
 import type { AppData, Task, TaskList } from './types';
 import { validateTimetable } from './timetable';
+import { validateJournal } from './journal';
+import { validateReflections } from './reflections';
+import { validateGoals, validateMarks } from './weekly';
+import { validateClassMarks } from './classes';
+import { validateWeights } from './weight';
 
 const DAY_MS = 86_400_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,10 +63,11 @@ export function monthDays(year: number, month: number): string[] {
 
 export function occursOn(task: Task, key: string): boolean {
   if (task.deletedAt || !task.date || !key || key < task.date) return false;
+  // 不重复的日程只需比较日期字符串；日历每格都要对所有日程判断一次，省掉解析日期能少很多卡顿。
+  if (task.repeat === 'none') return key === task.date;
   const date = parseDate(key);
   const start = parseDate(task.date);
   switch (task.repeat) {
-    case 'none': return key === task.date;
     case 'daily': return true;
     case 'weekdays': return date.getDay() !== 0 && date.getDay() !== 6;
     case 'weekly': return date.getDay() === start.getDay();
@@ -106,6 +112,11 @@ export function moveTask(task: Task, oldDate: string, newDate: string, time?: st
   const moved = { ...task, date: addDays(task.date, delta), time: time ?? task.time, updatedAt };
   moved.doneDates = [...new Set(task.doneDates.map(date => addDays(date, delta)))].filter(date => occursOn(moved, date)).sort();
   return moved;
+}
+
+/** 当天列表：完成的放到最后（同组里仍按原顺序）。 */
+export function doneLast(tasks: Task[], key: string): Task[] {
+  return [...tasks.filter(task => !isDone(task, key)), ...tasks.filter(task => isDone(task, key))];
 }
 
 export function tasksForDate(tasks: Task[], key: string): Task[] {
@@ -169,7 +180,7 @@ export const TASK_COLORS = ['#E5534B', '#F08C2E', '#D6A92B', '#3FA66B', '#1FA3A3
 
 /** Validate and copy untrusted imports before they can replace local data. */
 export function validateBackup(input: unknown): AppData {
-  const root = record(input, ['version', 'tasks', 'lists', 'timetable'], '备份');
+  const root = record(input, ['version', 'tasks', 'lists', 'timetable', 'journal', 'reflections', 'goals', 'goalMarks', 'classMarks', 'weights'], '备份');
   if (root.version !== 1) throw new Error('不支持的备份版本');
   if (!Array.isArray(root.tasks) || root.tasks.length > MAX_TASKS) throw new Error(`任务数量不能超过 ${MAX_TASKS}`);
   if (!Array.isArray(root.lists) || !root.lists.length || root.lists.length > MAX_LISTS) throw new Error(`清单数量须为 1 至 ${MAX_LISTS}`);
@@ -217,7 +228,13 @@ export function validateBackup(input: unknown): AppData {
     return { id, title, date, time, duration: item.duration, listId, notes, priority: item.priority, repeat: item.repeat as Task['repeat'], completed: item.completed, doneDates: doneDates.sort(), createdAt, updatedAt, ...(deletedAt ? { deletedAt } : {}), ...(color ? { color } : {}) };
   });
   const timetable = root.timetable === undefined ? undefined : validateTimetable(root.timetable);
-  return { version: 1, tasks, lists, ...(timetable ? { timetable } : {}) };
+  const journal = root.journal === undefined ? undefined : validateJournal(root.journal);
+  const reflections = root.reflections === undefined ? undefined : validateReflections(root.reflections);
+  const goals = root.goals === undefined ? undefined : validateGoals(root.goals);
+  const goalMarks = root.goalMarks === undefined ? undefined : validateMarks(root.goalMarks);
+  const classMarks = root.classMarks === undefined ? undefined : validateClassMarks(root.classMarks);
+  const weights = root.weights === undefined ? undefined : validateWeights(root.weights);
+  return { version: 1, tasks, lists, ...(timetable ? { timetable } : {}), ...(journal ? { journal } : {}), ...(reflections ? { reflections } : {}), ...(goals ? { goals } : {}), ...(goalMarks ? { goalMarks } : {}), ...(classMarks ? { classMarks } : {}), ...(weights ? { weights } : {}) };
 }
 
 function taskRevision(task: Task): string {

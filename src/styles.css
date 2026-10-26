@@ -14,3 +14,236 @@
 .ai-token-list small { display:block; color:var(--muted); font-size:11px; }
 .account-actions{display:flex;gap:8px;flex-wrap:wrap}.password-change{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:13px;padding:13px;border:1px solid #e7edf8;background:#f8fafe;border-radius:7px}.password-change>button,.password-change>p{grid-column:1/-1}.auth-link{grid-column:1/-1;justify-self:start;color:#6679d6;font-size:11px;padding:2px 0}.auth-link:hover{background:none;color:#4f64c7}.reset-offer{grid-column:1/-1;border:1px solid #d9def7;background:#f2f4fd;border-radius:7px;padding:12px}.reset-offer p{margin:0 0 10px!important;color:#6d789b!important}.reset-offer>div{display:flex;gap:8px}@media(max-width:680px){.password-change{grid-template-columns:1fr}.password-change>button,.password-change>p{grid-column:auto}}
 .calendar-event .event-star{flex:none;color:#e0a100}.row-star{color:#e0a100;margin-right:4px;vertical-align:-1px}
+
+/* 日记 */
+.journal-mark{display:inline-flex;align-items:center;flex:none;padding:0 4px;border-radius:3px;font-size:9px;line-height:15px;white-space:nowrap}
+.journal-mark.done{color:#fff;background:#3fa66b;font-weight:600}
+.journal-mark.done:hover{background:#358f5c}
+.journal-mark.pending{color:#8a93a6;background:#eceff4}
+.journal-mark.idle{color:#a9b1c3;background:#f1f3f7;visibility:hidden}
+.day-cell:hover .journal-mark.idle{visibility:visible}
+.journal-title{display:inline-flex;align-items:center;gap:6px}
+.journal-state{font-style:normal;font-size:9px;padding:0 5px;border-radius:3px;line-height:15px;color:#8a93a6;background:#eceff4}
+.journal-state.done{color:#fff;background:#3fa66b}
+.journal-count{font-size:9px;color:#b0b8c8;font-weight:400}
+.journal-editor{width:100%;min-height:130px;flex:0 1 auto;resize:vertical;border:1px solid #e8ecf4;border-radius:7px;background:#fffdf8;padding:10px 11px;font-size:12px;line-height:1.75;color:#5d6880;outline:none}
+.journal-editor:focus{border-color:#d9c3a3;outline:none;box-shadow:0 0 0 3px #f3e6d455}
+.journal-editor::placeholder{color:#bcc3d1}
+.journal-list .list-view-title .journal-today{margin-left:auto;padding:6px 10px}
+.journal-item{display:block;width:100%;text-align:left;padding:14px 4px;border-bottom:1px solid #f0f2f7;border-radius:0}
+.journal-item strong{font-size:12px;font-weight:550;color:#65708a}
+.journal-item p{margin:7px 0 0;font-size:12px;line-height:1.75;color:#7c869c;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+@media(max-width:680px){.journal-mark.idle{display:none}}
+/* 专属日记窗口 */
+.journal-surface,.journal-surface body{height:100%;background:#f3ede2}
+.journal-tools{display:inline-flex;align-items:center;gap:4px}
+.journal-tools .icon-button{width:22px;height:22px}
+.journal-window{--paper:#fffdf8;--ink:#3e3a33;--soft:#8c8273;--line-color:#efe6d6;--accent-warm:#c08a4a;height:100dvh;display:flex;flex-direction:column;background:radial-gradient(1200px 500px at 10% -10%,#fbf3e4 0,transparent 60%),linear-gradient(180deg,#f6f0e5,#efe7d8);color:var(--ink);padding:26px 30px 18px;gap:18px;font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
+.jw-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.jw-date{display:flex;align-items:center;gap:16px}
+.jw-day{font-family:Georgia,"Times New Roman",serif;font-size:58px;line-height:.9;color:var(--accent-warm);font-weight:400;letter-spacing:-2px;min-width:64px;text-align:center}
+.jw-date strong{display:block;font-size:16px;font-weight:600;color:#4d473d;letter-spacing:.5px}
+.jw-date small{display:block;margin-top:7px;font-size:12px;color:var(--soft)}
+.jw-nav{display:flex;align-items:center;gap:6px}
+.jw-nav button{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 10px;border-radius:17px;color:#7d6f5c;background:#ffffffa8;border:1px solid #e6dccb;font-size:12px}
+.jw-nav button:hover{background:#fff}
+.jw-body{flex:1;min-height:0;display:flex;gap:18px}
+.jw-paper{flex:1;min-width:0;display:flex;background:var(--paper);border:1px solid #eadfcb;border-radius:14px;box-shadow:0 1px 0 #fff inset,0 18px 40px -22px #6b512f55,0 2px 6px #6b512f14;position:relative;overflow:hidden}
+.jw-paper::before{content:"";position:absolute;left:46px;top:0;bottom:0;width:1px;background:#f0cfc4}
+.jw-text{flex:1;width:100%;border:0;outline:none;resize:none;background:transparent;padding:22px 30px 22px 66px;font-family:"LXGW WenKai","Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun",serif;font-size:17px;line-height:34px;color:var(--ink);background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 33px,var(--line-color) 33px,var(--line-color) 34px);background-attachment:local;background-position:0 22px}
+.jw-text:focus{outline:none}
+.jw-text::placeholder{color:#c0b5a3}
+.jw-loading{margin:auto;color:var(--soft)}
+.jw-side{width:200px;flex:none;overflow:auto;padding:16px 14px;border-radius:14px;background:#ffffff80;border:1px solid #e8dfcf}
+.jw-side h3{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--soft);letter-spacing:1px}
+.jw-task{display:flex;align-items:flex-start;gap:8px;padding:7px 0;font-size:12px;color:#5d5548;border-bottom:1px dashed #eadfcb}
+.jw-task i{width:6px;height:6px;border-radius:50%;margin-top:5px;flex:none}
+.jw-task small{color:var(--soft);margin-right:6px}
+.jw-task.done span{text-decoration:line-through;opacity:.55}
+.jw-foot{display:flex;justify-content:space-between;font-size:11px;color:var(--soft);padding:0 4px}
+@media(max-width:640px){.jw-side{display:none}.journal-window{padding:18px 16px 12px}}
+/* 复盘 */
+.review-view{display:flex;flex-direction:column;gap:14px}
+.review-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.review-top h2{display:flex;align-items:center;gap:8px;margin:0;font-size:15px;font-weight:600;color:#4f5a74}
+.review-top h2 svg{color:#d29b3c}
+.review-add{border:1px solid #ecdcbf;background:#fffaf0;border-radius:10px;padding:10px 12px}
+.review-add textarea{width:100%;border:0;outline:none;resize:none;background:transparent;font-size:13px;line-height:1.7;color:#4c4a43}
+.review-add textarea::placeholder{color:#c0b4a0}
+.review-add-bar{display:flex;align-items:center;gap:12px;margin-top:6px;font-size:10px;color:#a69a86}
+.review-add-bar label{display:flex;align-items:center;gap:6px}
+.review-add-bar input[type=date]{border:1px solid #ecdcbf;border-radius:5px;padding:3px 6px;font-size:11px;color:#7c705d;background:#fff}
+.review-add-bar .primary{margin-left:auto;padding:6px 14px;background:#d29b3c;border-color:#d29b3c}
+.review-add-bar .primary:hover{background:#bf8a2f}
+.review-day h3{display:flex;align-items:baseline;gap:8px;margin:6px 0 6px;font-size:12px;font-weight:600;color:#65708a}
+.review-day h3 em{font-style:normal;font-size:9px;color:#fff;background:#d29b3c;border-radius:3px;padding:0 4px;line-height:14px}
+.review-day h3 span{margin-left:auto;font-size:10px;font-weight:400;color:#aab1bf}
+.review-view ol{list-style:none;margin:0;padding:0}
+.review-item{display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-bottom:1px solid #f2f0ea}
+.review-num{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;color:#a7742a;background:#fbefd9;margin-top:1px}
+.review-item p{flex:1;margin:0;font-size:13px;line-height:1.75;color:#4c5568;white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
+.review-item p small{margin-left:8px;font-size:10px;color:#b3b9c6}
+.review-item textarea{flex:1;border:1px solid #ecdcbf;border-radius:6px;padding:4px 8px;font-size:13px;line-height:1.75;color:#4c5568;resize:vertical;outline:none;background:#fffdf8}
+.review-delete{opacity:0;color:#c7a7a7}
+.review-item:hover .review-delete{opacity:1}
+.review-range{display:flex;align-items:center;gap:8px;padding:6px 0 4px;border-bottom:1px solid #f0e6d3}
+.review-range strong{font-size:14px;font-weight:600;color:#5d5548;min-width:150px;text-align:center}
+.review-range span{margin-left:auto;font-size:11px;color:#a69a86}
+.review-summary .review-item{padding:11px 4px}
+
+/* 快速记复盘小窗口 */
+.review-quick{height:100dvh;display:flex;flex-direction:column;gap:10px;padding:16px 18px 14px;background:linear-gradient(180deg,#fffaf0,#f8efdc);color:#4c4a43;font-family:"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif}
+.review-quick header{display:flex;align-items:center;justify-content:space-between}
+.review-quick header span{display:flex;align-items:center;gap:7px;font-size:14px;font-weight:600;color:#7a5a24}
+.review-quick header svg{color:#d29b3c}
+.review-quick header small{font-size:11px;color:#a69a86}
+.review-quick textarea{flex:1;min-height:70px;width:100%;resize:none;border:1px solid #ecdcbf;border-radius:10px;background:#fff;padding:10px 12px;font-size:14px;line-height:1.7;color:#3e3a33;outline:none}
+.review-quick textarea:focus{border-color:#d9b67a;box-shadow:0 0 0 3px #f3e3c455}
+.review-quick textarea::placeholder{color:#c0b4a0}
+.review-quick ol{margin:0;padding:0 0 0 22px;font-size:12px;line-height:1.6;color:#7c705d;max-height:62px;overflow:auto}
+.review-quick ol li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.review-quick footer{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#a69a86}
+.review-quick footer .primary{padding:6px 16px;background:#d29b3c;border-color:#d29b3c}
+.review-quick footer .primary:hover{background:#bf8a2f}
+
+/* 周次任务 */
+.goal-cells{display:inline-flex;align-items:center;gap:4px}
+.goal-cell{width:20px;height:20px;padding:0;border-radius:6px;display:inline-grid;place-items:center;font-size:10px;font-weight:600;border:1.5px solid color-mix(in srgb,var(--goal) 55%,white);background:#fff;color:var(--goal)}
+.goal-cell.done{background:var(--goal);border-color:var(--goal);color:#fff}
+.goal-cell.planned{border-style:dashed;background:color-mix(in srgb,var(--goal) 10%,white)}
+.goal-cell.empty:hover{background:color-mix(in srgb,var(--goal) 14%,white)}
+.goal-cell.extra{opacity:.35}
+.goal-cells.compact .goal-cell{width:15px;height:15px;border-radius:4px;font-size:8px}
+.goal-dots{display:inline-flex;gap:2px;flex:none}
+.goal-dot{width:15px;height:15px;padding:0;border-radius:50%;display:inline-grid;place-items:center;font-size:8px;font-weight:700;color:#fff;background:var(--goal);border:1.5px solid var(--goal)}
+.goal-dot.planned{background:transparent;color:var(--goal);border-style:dashed}
+.goal-day{display:flex;flex-direction:column;gap:2px;margin-bottom:6px}
+.goal-day-row{display:flex;align-items:center;gap:7px;padding:6px 0;border-bottom:1px solid #f0f2f6;font-size:11px;color:#6e7890}
+.goal-day-row>i{width:7px;height:7px;border-radius:50%;background:var(--goal);flex:none}
+.goal-day-row>span{flex:1;min-width:0;display:flex;align-items:baseline;gap:6px}
+.goal-day-row small{font-size:9px;color:#aab1bf}
+.goal-day-row.reached small{color:#3fa66b;font-weight:600}
+.goal-day-btn{font-size:10px;padding:3px 8px;border-radius:5px;color:#fff;background:var(--goal);display:inline-flex;align-items:center;gap:3px}
+.goal-day-btn.ghost{color:#8b95aa;background:#f1f3f7}
+.goal-day-btn.on{color:var(--goal);background:color-mix(in srgb,var(--goal) 12%,white)}
+.weekly-view{display:flex;flex-direction:column;gap:12px}
+.weekly-top{display:flex;align-items:center;gap:12px}
+.weekly-top h2{display:flex;align-items:center;gap:8px;margin:0;font-size:15px;font-weight:600;color:#4f5a74}
+.weekly-range{display:flex;align-items:center;gap:4px;margin-left:auto}
+.weekly-range strong{font-size:12px;font-weight:600;color:#65708a;min-width:120px;text-align:center}
+.weekly-hint{margin:0;font-size:11px;line-height:1.8;color:#9aa3b6}
+.weekly-hint input{margin:0 4px;border:1px solid #e3e7f0;border-radius:4px;padding:1px 4px;font-size:10px;color:#6e7890}
+.weekly-goal{border:1px solid #edf0f5;border-left:4px solid var(--goal);border-radius:9px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;background:#fff}
+.weekly-goal.reached{background:color-mix(in srgb,#3fa66b 5%,white)}
+.weekly-goal header{display:flex;align-items:center;gap:9px}
+.weekly-goal header>i{display:none}
+.weekly-goal header strong{font-size:14px;font-weight:600;color:#3e465c}
+.weekly-count{font-size:16px;font-weight:600;color:var(--goal)}
+.weekly-count small{font-size:11px;color:#aab1bf;font-weight:400}
+.weekly-state{font-style:normal;font-size:10px;padding:1px 7px;border-radius:9px;color:#8b95aa;background:#f1f3f7}
+.weekly-state.done{color:#fff;background:#3fa66b}
+.weekly-tools{margin-left:auto;display:flex;gap:2px}
+.weekly-goal .goal-cell{width:30px;height:30px;border-radius:8px;font-size:12px}
+.weekly-days{margin:0;font-size:10px;color:#9aa3b6}
+.weekly-history{display:flex;align-items:flex-end;gap:10px}
+.weekly-bars{display:flex;align-items:flex-end;gap:3px;height:28px}
+.weekly-bars i{width:10px;border-radius:2px;background:#dfe3ec}
+.weekly-bars i.hit{background:color-mix(in srgb,var(--goal) 70%,white)}
+.weekly-history small{font-size:10px;color:#9aa3b6}
+.goal-form{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px;border:1px dashed #d7dceb;border-radius:9px;background:#fafbfe}
+.goal-form>input{flex:1;min-width:140px;border:1px solid #e3e7f0;border-radius:6px;padding:7px 9px;font-size:12px}
+.goal-form label{display:flex;align-items:center;gap:5px;font-size:11px;color:#8b95aa}
+.goal-form select{border:1px solid #e3e7f0;border-radius:5px;padding:4px;font-size:11px}
+.goal-colors{display:flex;gap:4px}
+.goal-colors button{width:16px;height:16px;border-radius:50%;padding:0;background:var(--goal)}
+.goal-colors button.on{box-shadow:0 0 0 2px #fff,0 0 0 3.5px var(--goal)}
+
+/* 课程状态三种颜色（颜色在 src/classes.ts CLASS_STATE_COLOR）：没上=原课程色，已上=灰蓝，待复习=琥珀 */
+.calendar-event.class-event{cursor:pointer}
+.calendar-event.class-event b.class-state{flex:none;font-size:9px;line-height:13px;padding:0 3px;border-radius:3px;color:#fff;background:#ffffff40}
+.class-editor{display:flex;flex-direction:column;gap:12px;padding:18px}
+.class-editor header{display:flex;align-items:center;gap:10px;color:#2a9d8f}
+.class-editor header strong{display:block;font-size:15px;color:#33415a}
+.class-editor header small{display:block;margin-top:3px;font-size:11px;color:#8e98ad}
+.class-status-pick{display:flex;gap:8px}
+.class-status-pick button,.day-class-states button{flex:1;padding:8px 0;border-radius:8px;border:1.5px solid #dfe5ee;font-size:12px;font-weight:600;color:#7a8499;background:#fff}
+.class-status-pick button.on.status-done,.day-class-states button.on.status-done{background:#6f7fa0;border-color:#6f7fa0;color:#fff}
+.class-status-pick button.on.status-todo,.day-class-states button.on.status-todo{background:#2a9d8f;border-color:#2a9d8f;color:#fff}
+.class-status-pick button.on.status-review,.day-class-states button.on.status-review{background:#e39a2d;border-color:#e39a2d;color:#fff}
+.class-editor textarea{width:100%;border:1px solid #e1e7f0;border-radius:8px;padding:9px 10px;font-size:13px;line-height:1.6;resize:none;outline:none;color:#4c5568}
+.class-editor textarea:focus{border-color:#9fd3cb}
+.class-editor footer{display:flex;align-items:center;gap:8px}
+.class-editor footer span{margin-right:auto;font-size:10px;color:#a3abbb}
+.class-modal{width:420px}
+.class-window{height:100dvh;background:linear-gradient(180deg,#f6fbfa,#eef6f4)}
+.class-window .jw-loading{padding:40px;text-align:center;color:#8e98ad}
+.day-classes{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.day-class{display:flex;flex-direction:column;gap:5px;padding:7px 0;border-bottom:1px solid #f0f2f6}
+.day-class-main{display:flex;align-items:baseline;gap:7px;text-align:left;padding:0}
+.day-class-main small{font-size:9px;color:#2a9d8f;font-weight:600}
+.day-class-main span{font-size:11px;color:#5d6880}
+.day-class-main em{display:block;font-style:normal;font-size:10px;color:#a3abbb;margin-top:2px}
+.day-class.status-done .day-class-main span{color:#6f7fa0}
+.day-class.status-review .day-class-main span{color:#c97f12;font-weight:600}
+.day-class.status-todo .day-class-main span{color:#2a9d8f}
+.day-class-states{display:flex;gap:5px}
+.day-class-states button{padding:3px 0;font-size:10px;border-radius:6px}
+.class-review-item{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid #f0f2f7}
+.class-review-main{flex:1;text-align:left;padding:0;border-left:3px solid #e39a2d;padding-left:10px}
+.class-review-main strong{font-size:13px;color:#3e465c}
+.class-review-main small{margin-left:8px;font-size:10px;color:#a3abbb}
+.class-review-main p{margin:5px 0 0;font-size:12px;line-height:1.6;color:#7c869c;white-space:pre-wrap}
+
+/* 周次任务排在时间轴上：虚线=安排，实色=已完成 */
+.calendar-event.goal-event.planned{background:color-mix(in srgb,var(--event-color) 12%,white);outline:1.5px dashed var(--event-color);outline-offset:-1.5px}
+.calendar-event.goal-event.done{background:var(--event-color);color:#fff;opacity:1}
+.calendar-event.goal-event.done span{text-decoration:none;opacity:1}
+.goal-day-time{border:1px solid #e3e7f0;border-radius:5px;padding:2px 4px;font-size:10px;color:#6e7890;width:74px}
+
+.weekly-settings{margin:0;font-size:10px;color:#9aa3b6}
+.goal-form label input[type=time]{border:1px solid #e3e7f0;border-radius:5px;padding:3px 5px;font-size:11px;margin:0 3px}
+.goal-days{display:flex;gap:3px}
+.goal-days button{padding:3px 6px;border-radius:5px;font-size:10px;color:#9aa3b6;background:#f1f3f7}
+.goal-days button.on{color:#fff;background:#6f7fd4}
+.goal-adjust{font-size:11px;padding:3px 9px;border-radius:12px;color:#5b6b8c;background:#eef1f8}
+/* 完成了的事情统一一种颜色（和“已上”的课同色，见 src/classes.ts CLASS_STATE_COLOR.done），取消完成恢复原色 */
+.calendar-event.done,.timeline-event.done,.task-row.done{--event-color:#6F7FA0 !important}
+.task-row.done .priority{background:#6F7FA0 !important}
+
+/* 测体重 */
+.calendar-event.weight-event{cursor:pointer}
+.weight-editor{display:flex;flex-direction:column;gap:12px;padding:18px}
+.weight-editor header{display:flex;align-items:center;gap:10px;color:#c9822b}
+.weight-editor header strong{display:block;font-size:15px;color:#33415a}
+.weight-editor header small{display:block;margin-top:3px;font-size:11px;color:#8e98ad}
+.weight-input{display:flex;align-items:baseline;gap:8px}
+.weight-input input{flex:1;min-width:0;font-size:30px;font-weight:600;letter-spacing:.5px;padding:6px 10px;border:1px solid #e1e7f0;border-radius:10px;color:#33415a;outline:none;font-variant-numeric:tabular-nums}
+.weight-input input:focus{border-color:#e3b47a;box-shadow:0 0 0 3px #f7e4cc66}
+.weight-input span{font-size:16px;color:#8e98ad}
+.weight-hint{margin:0;font-size:11px;color:#9aa3b6}
+.weight-editor footer{display:flex;align-items:center;gap:8px}
+.weight-editor footer>span{flex:1}
+.weight-modal{width:380px}
+.weight-window{background:linear-gradient(180deg,#fbf8f3,#f3eee6)}
+.weight-view{display:flex;flex-direction:column;gap:12px}
+.weight-view .list-view-title h2{display:flex;align-items:center;gap:7px}
+.weight-today{margin-left:auto;padding:6px 12px}
+.weight-chart-card{max-width:680px;border:1px solid #e6e9f0;border-radius:12px;padding:12px 14px;background:#fff}
+.weight-chart-card.compact{border:0;padding:4px 0;background:transparent}
+.weight-chart-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;font-size:13px;color:#5d6679;flex-wrap:wrap}
+.weight-ranges{display:flex;gap:2px;background:#f1f3f7;border-radius:8px;padding:2px}
+.weight-ranges button{border:0;background:transparent;padding:3px 9px;border-radius:6px;font-size:12px;color:#5d6679;cursor:pointer}
+.weight-ranges button.active{background:#fff;color:#c9822b;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.weight-chart-empty{color:#9aa3b6;font-size:13px;margin:18px 0;text-align:center}
+.weight-chart{width:100%;height:auto;display:block}
+.weight-chart polyline{fill:none;stroke:#c9822b;stroke-width:2}
+.weight-chart circle{fill:#fff;stroke:#c9822b;stroke-width:2}
+.weight-chart line{stroke:#e6e9f0}
+.weight-chart text{font-size:11px;fill:#9aa3b6}
+.weight-list{list-style:none;margin:0;padding:0}
+.weight-list button{display:flex;align-items:baseline;gap:14px;width:100%;text-align:left;padding:10px 4px;border-bottom:1px solid #f0f2f7;border-radius:0}
+.weight-list span{flex:1;font-size:12px;color:#65708a}
+.weight-list b{font-size:14px;color:#3e465c;font-variant-numeric:tabular-nums}
+.weight-list small{width:44px;text-align:right;font-size:11px;color:#9aa3b6;font-variant-numeric:tabular-nums}
+.weight-list small.up{color:#d0674f}
+.weight-list small.down{color:#3fa66b}
