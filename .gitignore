@@ -10,3 +10,4 @@ release-*/
 test-results/
 # Stray Windows profile folder created by an earlier run (mojibake name)
 /䶈⑇ǫ/
+playwright-report/
