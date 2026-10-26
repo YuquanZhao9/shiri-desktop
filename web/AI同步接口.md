@@ -54,7 +54,7 @@ update 只改传进来的字段。
 | `update` | `id`, `changes` | `event`（重复日程改日期或时间会影响整个系列） |
 | `complete` | `id`, 可选 `done`（默认 true）, 重复日程需要 `date` | `event` |
 | `delete` | `id` | `{ "deleted": id }`（软删除，各设备会同步删掉） |
-| `upsert` | `externalId`（1–300 字，如 `gmail:<messageId>`）, 可选 `source`, `event` | `status`：`created` / `updated` / `unchanged` / `skipped_deleted`（用户删过就不再加回来），以及 `event` |
+| `upsert` | `externalId`（1–300 字，如 `gmail:<messageId>`）, 可选 `source`, `event`, `force` | `status`：`created` / `updated` / `unchanged` / `skipped_deleted`（用户删过就不再加回来）/ `skipped_completed`（已完成的不改；确实要改传 `force: true`，或换一个 `externalId` 新建），以及 `event` |
 | `find` | `externalId` | `event`（没有为 null），`deleted` |
 | `busy` | `from`, `to`（最多 62 天）, 可选 `state`（德国联邦州代码，如 BW；默认只算全国性假日） | `days[]`：`date`、`weekday`（1=周一）、`holiday`（德国假日名或 null）、`allDay[]`（全天日程）、`blocks[]`：`{start, end, kind: "event"|"class", title, id?, optional?}`。未完成的定时日程和课表课程都算在内；课程已去掉停课期和德国假日，虚线课（可选或看录像）带 `optional: true` |
 | `free` | `from`, `to`（最多 62 天）, 可选 `dayStart`（默认 08:00）、`dayEnd`（默认 20:00）、`minMinutes`（默认 30）、`weekends`（默认 false）、`ignoreOptional`（默认 false）、`state` | `days[]`：`date`、`holiday`、`free[]`：`{start, end, minutes}` |
@@ -70,6 +70,7 @@ update 只改传进来的字段。
 | 401 | invalid_token | 令牌缺失、格式不对或已撤销 |
 | 404 | not_found | 日程不存在或已删除 |
 | 405 | method_not_allowed | 没有用 POST |
+| 409 | conflict | 要改的日程在读取后刚被电脑或手机改过，这次整批都没写入；重新读取后再试 |
 | 413 | too_large | 请求超过 1 MB |
 | 500 | storage_error / internal_error | 服务器问题，可以稍后重试 |
 

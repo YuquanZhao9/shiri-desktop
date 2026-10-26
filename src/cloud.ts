@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { defaultData, mergeTasks, validateBackup } from './core';
 import type { Task, TaskList } from './types';
+import { sameContent } from './stable-json';
 
 export interface CloudSettings {
   url: string;
@@ -177,6 +178,18 @@ function parseRemoteTasks(payloads: unknown[]): Task[] {
 }
 
 /**
+ * 只上传合并后和云端不一样的日程。以前每次同步都把全部日程传一遍，日程多了以后很慢；
+ * 云端 merge_tasks 与 mergeTasks 用同一套规则，云端已经是赢家的那些传上去也不会变。
+ */
+export function tasksToPush(local: Task[], remote: Task[]): Task[] {
+  const remoteById = new Map(remote.map(task => [task.id, task]));
+  return mergeTasks(local, remote).filter(task => {
+    const stored = remoteById.get(task.id);
+    return !stored || !sameContent(task, stored);
+  });
+}
+
+/**
  * Local-first snapshot sync. Caller must isolate datasets by project + user ID,
  * and merge edits made while awaiting this promise into the returned snapshot.
  * LWW uses client timestamps, so badly incorrect device clocks affect ordering.
@@ -186,15 +199,16 @@ export async function syncTasks(client: SupabaseClient, tasks: Task[]): Promise<
   if (error || !data.user) throw new Error('请先登录后再同步。');
   const userId = data.user.id;
   const before = await readTasks(client, userId);
-  const merged = mergeTasks(parseRemoteTasks(tasks), before);
-  for (let start = 0; start < merged.length; start += PAGE_SIZE) {
+  const push = tasksToPush(parseRemoteTasks(tasks), before);
+  for (let start = 0; start < push.length; start += PAGE_SIZE) {
     const { error: mergeError } = await client.rpc('merge_tasks', {
-      incoming: merged.slice(start, start + PAGE_SIZE),
+      incoming: push.slice(start, start + PAGE_SIZE),
       expected_user: userId,
     });
     if (mergeError) throw new Error(cloudErrorMessage(mergeError));
   }
-  const canonical = await readTasks(client, userId);
+  // 没有要上传的就不用再读一遍：云端就是刚读到的样子。
+  const canonical = push.length ? await readTasks(client, userId) : before;
   const { data: finalAuth, error: authError } = await client.auth.getUser();
   if (authError || finalAuth.user?.id !== userId) {
     throw new Error('同步期间账号发生变化，请在当前账号重新同步。');
