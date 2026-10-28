@@ -58,3 +58,28 @@ test('忙碌与空闲：日程 + 课表（默认 WS 2026/27），周五没课，
   assert.equal(free([friday], {}).length, 1);
   assert.equal(free(busy([], undefined, '2026-10-17', '2026-10-18', '').days, {}).length, 0); // 周末默认不排
 });
+
+test('体重：记下、改、读、列出、删除，写出的记录电脑版能读入', async () => {
+  const { writeWeight, removeWeight, listWeights, getWeight } = await import('../supabase/functions/ai-sync/ops.ts');
+  const { validateWeights } = await import('../../src/weight.ts');
+  const first = writeWeight([], '2026-10-20', 70.04, now);
+  assert.equal(first.status, 'created'); assert.equal(first.entry.kg, 70); assert.equal(first.entry.id, 'weight_20261020');
+  const same = writeWeight(first.list, '2026-10-20', '70,0', now + 1);
+  assert.equal(same.status, 'unchanged'); assert.equal(same.list, first.list);
+  const changed = writeWeight(same.list, '2026-10-20', '69.8kg', now + 2);
+  assert.equal(changed.status, 'updated'); assert.equal(changed.entry.kg, 69.8); assert.ok(changed.entry.updatedAt > first.entry.updatedAt);
+  const second = writeWeight(changed.list, '2026-10-21', 69.5, now + 3);
+  assert.deepEqual(listWeights(second.list).map(w => [w.date, w.kg]), [['2026-10-20', 69.8], ['2026-10-21', 69.5]]);
+  assert.deepEqual(listWeights(second.list, '2026-10-21', '2026-10-31').map(w => w.date), ['2026-10-21']);
+  assert.equal(getWeight(second.list, '2026-10-21')?.kg, 69.5);
+  const gone = removeWeight(second.list, '2026-10-21', now + 4);
+  assert.equal(gone.deleted, true); assert.ok(gone.entry?.deletedAt);
+  assert.equal(getWeight(gone.list, '2026-10-21'), null);
+  assert.equal(removeWeight(gone.list, '2026-10-21', now + 5).deleted, false);
+  const again = writeWeight(gone.list, '2026-10-21', 69.6, now + 6);
+  assert.equal(again.status, 'created'); assert.equal(again.entry.deletedAt, undefined);
+  validateWeights(again.list);
+  assert.throws(() => writeWeight([], '2026-02-30', 70, now), /date/);
+  assert.throws(() => writeWeight([], '2026-10-20', 5, now), /kg/);
+  assert.throws(() => writeWeight([], '2026-10-20', 'abc', now), /kg/);
+});

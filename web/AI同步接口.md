@@ -1,12 +1,12 @@
 # 昱时 AI 同步接口（ai-sync）
 
-AI 对话、Claude 技能或自动任务用它读写用户的日程。写入后，电脑版和手机版会通过实时推送在几秒内更新。
+AI 对话、Claude 技能或自动任务用它读写用户的日程和体重记录。写入后，电脑版和手机版会通过实时推送在几秒内更新。
 
 ## 调用方式
 
 - 地址：`POST https://kaoqvxmxcywlzqhnkacg.supabase.co/functions/v1/ai-sync`
 - 请求头：`Authorization: Bearer yst_…`（AI 同步令牌）、`Content-Type: application/json`
-- 令牌在哪里生成：手机版「我的 → AI 同步令牌 → 生成新令牌」，或电脑版管理窗口（Ctrl+Alt+D）「设置 → AI 同步令牌」。令牌只显示一次，可随时撤销。它只能读写日程，不能登录账号。
+- 令牌在哪里生成：手机版「我的 → AI 同步令牌 → 生成新令牌」，或电脑版管理窗口（Ctrl+Alt+D）「设置 → AI 同步令牌」。令牌只显示一次，可随时撤销。它只能读写日程和体重，不能登录账号。
 - 请求体可以是单个操作 `{ "action": … }`，也可以是批量 `{ "operations": [ {…}, … ] }`（最多 50 个）。批量时逐个执行，一个失败不影响其余，最后一起写入。后面的操作可以用前面新建日程返回的 id。
 - 成功：`{ "ok": true, …结果 }`；批量：`{ "ok": true, "results": [ { "ok": true, … } | { "ok": false, "error": { "code", "message" } } ] }`
 - 失败：`{ "ok": false, "error": { "code": "…", "message": "中文说明" } }`，HTTP 状态码见下表
@@ -57,20 +57,57 @@ update 只改传进来的字段。
 | `upsert` | `externalId`（1–300 字，如 `gmail:<messageId>`）, 可选 `source`, `event`, `force` | `status`：`created` / `updated` / `unchanged` / `skipped_deleted`（用户删过就不再加回来）/ `skipped_completed`（已完成的不改；确实要改传 `force: true`，或换一个 `externalId` 新建），以及 `event` |
 | `find` | `externalId` | `event`（没有为 null），`deleted` |
 | `busy` | `from`, `to`（最多 62 天）, 可选 `state`（德国联邦州代码，如 BW；默认只算全国性假日） | `days[]`：`date`、`weekday`（1=周一）、`holiday`（德国假日名或 null）、`allDay[]`（全天日程）、`blocks[]`：`{start, end, kind: "event"|"class", title, id?, optional?}`。未完成的定时日程和课表课程都算在内；课程已去掉停课期和德国假日，虚线课（可选或看录像）带 `optional: true` |
+| `weight_list` | 可选 `from`, `to`（最多 3660 天；都不传就是全部） | `weights[]`：`{date, kg, updatedAt}`，最早的在前 |
+| `weight_get` | `date` | `weight`：`{date, kg, updatedAt}`，那天没记为 null |
+| `weight_set` | `date`, `kg` | `status`：`created` / `updated` / `unchanged`，以及 `weight` |
+| `weight_delete` | `date` | `deleted`：true；那天本来就没有记录为 false |
 | `free` | `from`, `to`（最多 62 天）, 可选 `dayStart`（默认 08:00）、`dayEnd`（默认 20:00）、`minMinutes`（默认 30）、`weekends`（默认 false）、`ignoreOptional`（默认 false）、`state` | `days[]`：`date`、`holiday`、`free[]`：`{start, end, minutes}` |
+
+## 体重（weight_*）
+
+昱时每天 08:00 有一条“测体重”，填了数字就算完成并从日历上消失，电脑版「体重」页和手机「我的」里有折线图。这几个操作读写的就是这些数字，写入后各设备几秒内更新。
+
+- 每天最多一条：`date`（`YYYY-MM-DD`，用户当地日期）+ `kg`
+- `kg`：20–400 之间的数字，保留一位小数；也可以传文字 `"72.5"`、`"72,5"`、`"72.5kg"`
+- 同一天再 `weight_set` 就是改掉；数字一样返回 `unchanged`，不会写入
+- `weight_delete` 是软删除，各设备会同步删掉；之后再 `weight_set` 同一天会重新记上
+- 和日程一样，读取后如果那一天刚在电脑或手机上改过，整批返回 409 `conflict`，重新读取后再试
+- 体重和日程可以放在同一个 `operations` 批量里
+
+示例（数值都是示意）：
+
+```bash
+# 记下今天的体重
+curl -X POST https://kaoqvxmxcywlzqhnkacg.supabase.co/functions/v1/ai-sync   -H "Authorization: Bearer $YUSHI_TOKEN" -H "Content-Type: application/json"   -d '{"action":"weight_set","date":"2026-10-28","kg":72.5}'
+# → {"ok":true,"status":"created","weight":{"date":"2026-10-28","kg":72.5,"updatedAt":"2026-10-28T06:05:12.345Z"}}
+
+# 查最近一周
+curl -X POST https://kaoqvxmxcywlzqhnkacg.supabase.co/functions/v1/ai-sync   -H "Authorization: Bearer $YUSHI_TOKEN" -H "Content-Type: application/json"   -d '{"action":"weight_list","from":"2026-10-22","to":"2026-10-28"}'
+# → {"ok":true,"weights":[{"date":"2026-10-22","kg":73.1,"updatedAt":"…"},…,{"date":"2026-10-28","kg":72.5,"updatedAt":"…"}]}
+```
+
+批量（例如从体重秤或健康 App 导出的几天一起补上，再删掉记错的一天）：
+
+```json
+{ "operations": [
+  { "action": "weight_set", "date": "2026-10-26", "kg": "72.9" },
+  { "action": "weight_set", "date": "2026-10-27", "kg": 72.7 },
+  { "action": "weight_delete", "date": "2026-10-25" }
+] }
+```
 
 ## 错误码
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
-| 400 | invalid_request | 字段缺失或格式不对（message 会说明是哪一项） |
+| 400 | invalid_request | 字段缺失或格式不对（message 会说明是哪一项，例如体重不在 20–400 kg） |
 | 400 | unknown_list | 清单名不存在（message 里列出可用的清单） |
 | 400 | unknown_action | action 不认识 |
 | 400 | not_on_date | 重复日程在这一天不发生 |
 | 401 | invalid_token | 令牌缺失、格式不对或已撤销 |
 | 404 | not_found | 日程不存在或已删除 |
 | 405 | method_not_allowed | 没有用 POST |
-| 409 | conflict | 要改的日程在读取后刚被电脑或手机改过，这次整批都没写入；重新读取后再试 |
+| 409 | conflict | 要改的日程或体重在读取后刚被电脑或手机改过，这次整批都没写入；重新读取后再试 |
 | 413 | too_large | 请求超过 1 MB |
 | 500 | storage_error / internal_error | 服务器问题，可以稍后重试 |
 

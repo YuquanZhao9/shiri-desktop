@@ -4,9 +4,10 @@ import { isDone, occursOn, validateBackup } from '../_shared/core.ts';
 import { classesForDate, effectiveTimetable } from '../_shared/timetable.ts';
 import { germanHoliday, GERMAN_STATES } from '../_shared/holidays.ts';
 import type { GermanState } from '../_shared/holidays.ts';
-import type { Task, TaskList, Timetable } from '../_shared/types.ts';
+import { parseKg, setWeight, validateWeight, weightHistory, weightId } from '../_shared/weight.ts';
+import type { Task, TaskList, Timetable, WeightEntry } from '../_shared/types.ts';
 
-export type { Task, TaskList, Timetable };
+export type { Task, TaskList, Timetable, WeightEntry };
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
@@ -225,4 +226,50 @@ export function free(busyDays: ReturnType<typeof busy>['days'], options: { daySt
     if (stop - cursor >= min) slots.push({ start: hhmm(cursor), end: hhmm(stop), minutes: stop - cursor });
     return { date: day.date, holiday: day.holiday, free: slots };
   });
+}
+
+// ---- 体重（每天一个 kg 数字，存在 shiri_weekly，kind = 'weight'）----
+
+export const weightView = (entry: WeightEntry) => ({ date: entry.date, kg: entry.kg, updatedAt: entry.updatedAt });
+
+function weightDate(value: unknown): string {
+  if (!validDate(value)) throw bad('date 格式为 YYYY-MM-DD');
+  return value;
+}
+
+/** kg 可以是数字，也可以是“72.5”“72,5”“72.5kg”这样的文字；范围 20–400，保留一位小数。 */
+export function weightKg(value: unknown): number {
+  const kg = typeof value === 'number' ? (Number.isFinite(value) && value >= 20 && value <= 400 ? Math.round(value * 10) / 10 : null) : typeof value === 'string' ? parseKg(value) : null;
+  if (kg === null) throw bad('kg 须是 20 到 400 之间的数字，例如 72.5');
+  return kg;
+}
+
+/** 记下或改掉某天的体重；返回新列表、这一天的记录和状态（同一天同一数字为 unchanged）。 */
+export function writeWeight(list: WeightEntry[], date: unknown, kg: unknown, now: number): { list: WeightEntry[]; entry: WeightEntry; status: 'created' | 'updated' | 'unchanged' } {
+  const day = weightDate(date), value = weightKg(kg);
+  const before = list.find(item => item.id === weightId(day));
+  const next = setWeight(list, day, value, now);
+  const entry = validateWeight(next.find(item => item.id === weightId(day)));
+  const status = next === list ? 'unchanged' : before && !before.deletedAt ? 'updated' : 'created';
+  return { list: next, entry, status };
+}
+
+/** 删掉某天的体重（留一条带删除时间的记录，各设备同步删掉）；那天没有记录时 deleted 为 false。 */
+export function removeWeight(list: WeightEntry[], date: unknown, now: number): { list: WeightEntry[]; entry?: WeightEntry; deleted: boolean } {
+  const day = weightDate(date);
+  const next = setWeight(list, day, null, now);
+  if (next === list) return { list, deleted: false };
+  return { list: next, entry: validateWeight(next.find(item => item.id === weightId(day))), deleted: true };
+}
+
+/** 范围内记过的体重，最早的在前；不给范围就是全部。 */
+export function listWeights(list: WeightEntry[], from?: unknown, to?: unknown): ReturnType<typeof weightView>[] {
+  const [start, end] = from === undefined && to === undefined ? ['0000-01-01', '9999-12-31'] : checkRange(from, to, 3660);
+  return weightHistory(list).filter(item => item.date >= start && item.date <= end).reverse().map(weightView);
+}
+
+export function getWeight(list: WeightEntry[], date: unknown) {
+  const day = weightDate(date);
+  const entry = weightHistory(list).find(item => item.date === day);
+  return entry ? weightView(entry) : null;
 }

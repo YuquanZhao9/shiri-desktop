@@ -1,10 +1,11 @@
-// 昱时 AI 同步接口：AI 对话或自动任务用“AI 同步令牌”读写这个账号的日程。
+// 昱时 AI 同步接口：AI 对话或自动任务用“AI 同步令牌”读写这个账号的日程和体重记录。
 // 部署：supabase functions deploy ai-sync --no-verify-jwt --use-api（先运行 node scripts/sync-shared.mjs）
 // 令牌只存 SHA-256 哈希（表 shiri_ai_tokens）；写入 shiri_tasks 后，电脑和手机经实时推送几秒内更新。
 import { createClient } from 'npm:@supabase/supabase-js@2.116.0';
 import { defaultData } from '../_shared/core.ts';
 import { validateTimetable as checkTimetable } from '../_shared/timetable.ts';
-import { ApiError, applyFields, assertStorable, bad, busy, checkRange, eventView, free, newTask, nextStamp, occurrences, parseState, setDone, type Task, type TaskList, type Timetable } from './ops.ts';
+import { validateWeight } from '../_shared/weight.ts';
+import { ApiError, applyFields, assertStorable, bad, busy, checkRange, eventView, free, getWeight, listWeights, newTask, nextStamp, occurrences, parseState, removeWeight, setDone, weightView, writeWeight, type Task, type TaskList, type Timetable, type WeightEntry } from './ops.ts';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
@@ -22,16 +23,18 @@ interface Ctx {
   stored: Map<string, string>; // taskId -> 读取时云端的 modified_at，写入前用来检查有没有被别的设备改过
   links: Map<string, string>; // externalId -> taskId
   dirty: Map<string, Task>; newLinks: { external_id: string; task_id: string; source: string }[];
+  weights: WeightEntry[]; weightStored: Map<string, string>; weightDirty: Map<string, WeightEntry>;
 }
 
 async function load(userId: string): Promise<Ctx> {
-  const [tasks, lists, timetable, links] = await Promise.all([
+  const [tasks, lists, timetable, links, weights] = await Promise.all([
     admin.from('shiri_tasks').select('payload, modified_at').eq('user_id', userId),
     admin.from('shiri_lists').select('payload').eq('user_id', userId),
     admin.from('shiri_timetable').select('payload').eq('user_id', userId).maybeSingle(),
     admin.from('shiri_ai_links').select('external_id, task_id').eq('user_id', userId),
+    admin.from('shiri_weekly').select('payload, updated_at').eq('user_id', userId).eq('kind', 'weight'),
   ]);
-  for (const result of [tasks, lists, timetable, links]) if (result.error) throw new ApiError(500, 'storage_error', result.error.message);
+  for (const result of [tasks, lists, timetable, links, weights]) if (result.error) throw new ApiError(500, 'storage_error', result.error.message);
   const listRows = (lists.data ?? []).map((row: { payload: TaskList }) => row.payload);
   let table: Timetable | undefined;
   try { table = timetable.data ? checkTimetable((timetable.data as { payload: unknown }).payload) : undefined; } catch { table = undefined; }
@@ -43,7 +46,21 @@ async function load(userId: string): Promise<Ctx> {
     timetable: table,
     links: new Map((links.data ?? []).map((row: { external_id: string; task_id: string }) => [row.external_id, row.task_id])),
     dirty: new Map(), newLinks: [],
+    ...loadWeights((weights.data ?? []) as { payload: unknown; updated_at: string }[]),
   };
+}
+
+function loadWeights(rows: { payload: unknown; updated_at: string }[]) {
+  const weights: WeightEntry[] = [], weightStored = new Map<string, string>();
+  for (const row of rows) {
+    try { const entry = validateWeight(row.payload); weights.push(entry); weightStored.set(entry.id, row.updated_at); } catch { /* 跳过损坏的一行 */ }
+  }
+  return { weights, weightStored, weightDirty: new Map<string, WeightEntry>() };
+}
+
+function keepWeight(ctx: Ctx, list: WeightEntry[], entry?: WeightEntry) {
+  ctx.weights = list;
+  if (entry) ctx.weightDirty.set(entry.id, entry);
 }
 
 function live(ctx: Ctx, id: unknown): Task {
@@ -130,8 +147,20 @@ function run(ctx: Ctx, op: Record<string, unknown>): unknown {
       const [from, to] = checkRange(op.from, op.to, 62);
       return { days: free(busy([...ctx.tasks.values()], ctx.timetable, from, to, parseState(op.state)).days, op) };
     }
+    case 'weight_list': return { weights: listWeights(ctx.weights, op.from, op.to) };
+    case 'weight_get': return { weight: getWeight(ctx.weights, op.date) };
+    case 'weight_set': {
+      const { list, entry, status } = writeWeight(ctx.weights, op.date, op.kg, ctx.now);
+      keepWeight(ctx, list, status === 'unchanged' ? undefined : entry);
+      return { status, weight: weightView(entry) };
+    }
+    case 'weight_delete': {
+      const { list, entry, deleted } = removeWeight(ctx.weights, op.date, ctx.now);
+      keepWeight(ctx, list, entry);
+      return { deleted };
+    }
     default:
-      throw bad('action 只能是 info / list / get / find / create / upsert / update / complete / delete / busy / free', 'unknown_action');
+      throw bad('action 只能是 info / list / get / find / create / upsert / update / complete / delete / busy / free / weight_list / weight_get / weight_set / weight_delete', 'unknown_action');
   }
 }
 
@@ -151,6 +180,20 @@ async function commit(ctx: Ctx) {
     }));
     const { error } = await admin.from('shiri_tasks').upsert(rows, { onConflict: 'user_id,id' });
     if (error) throw new ApiError(500, 'storage_error', error.message);
+  }
+  if (ctx.weightDirty.size) {
+    // 和日程一样：读取后别的设备改过同一天，就整批不写，让调用方重新读取再试。
+    const ids = [...ctx.weightDirty.keys()];
+    const { data, error } = await admin.from('shiri_weekly').select('id, updated_at').eq('user_id', ctx.userId).eq('kind', 'weight').in('id', ids);
+    if (error) throw new ApiError(500, 'storage_error', error.message);
+    const changed = (data ?? []).filter((row: { id: string; updated_at: string }) => !ctx.weightStored.has(row.id) || Date.parse(row.updated_at) !== Date.parse(ctx.weightStored.get(row.id)!));
+    if (changed.length) throw new ApiError(409, 'conflict', `体重 ${changed.map((row: { id: string }) => row.id.slice(7)).join('、')} 刚在别的设备上改过，这次没有写入，请重新读取后再试`);
+    const rows = [...ctx.weightDirty.values()].map(entry => ({
+      user_id: ctx.userId, id: entry.id, kind: 'weight', day: entry.date, payload: entry, deleted: !!entry.deletedAt,
+      updated_at: entry.deletedAt && entry.deletedAt > entry.updatedAt ? entry.deletedAt : entry.updatedAt,
+    }));
+    const { error: writeError } = await admin.from('shiri_weekly').upsert(rows, { onConflict: 'user_id,id' });
+    if (writeError) throw new ApiError(500, 'storage_error', writeError.message);
   }
   if (ctx.newLinks.length) {
     const { error } = await admin.from('shiri_ai_links').upsert(ctx.newLinks.map(link => ({ ...link, user_id: ctx.userId })), { onConflict: 'user_id,external_id' });
