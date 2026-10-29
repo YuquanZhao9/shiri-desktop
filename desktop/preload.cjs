@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('desktop', Object.freeze({
   notify: (notification) => ipcRenderer.invoke('desktop:notify', notification),
   syncReminders: (reminders) => ipcRenderer.invoke('desktop:sync-reminders', reminders),
   showWindow: () => ipcRenderer.invoke('desktop:show-window'),
+  copyText: (text) => ipcRenderer.invoke('desktop:copy-text', text),
   onModeChanged: (callback) => subscribe('desktop:mode-changed', callback),
   onCellEditorOpen: (callback) => subscribe('desktop:cell-editor-open', callback),
   onCellEditorBlur: (callback) => subscribe('desktop:cell-editor-blur', callback),

@@ -23,6 +23,7 @@ import { activeGoals, addMark, autoPlanWeek, replanWeek, deleteGoal as deleteGoa
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from '@shared/journal';
 import { parseQuick } from './quick';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from '@shared/ai-token';
+import { copyText } from '@shared/clipboard';
 import type { AiTokenInfo } from '@shared/ai-token';
 import { currentSubscription, disablePush, enablePush, isStandalone, pushSupported, saveSubscription, VAPID_PUBLIC_KEY } from './push';
 
@@ -1009,14 +1010,15 @@ function TimetablePage({ timetable, today, visible, onVisible }: { timetable: Ti
   );
 }
 
-/** AI 同步令牌：生成后只显示一次，交给 Claude 的技能或自动任务使用；可随时撤销。 */
+/** AI 同步令牌：交给 Claude 的技能或自动任务使用；生成后随时可以再查看、复制，可随时撤销。 */
 function AiTokenCard({ client, userId, projectUrl, say }: { client: SupabaseClient; userId: string; projectUrl: string; say: (text: string) => void }) {
   const [tokens, setTokens] = useState<AiTokenInfo[] | null>(null);
   const [fresh, setFresh] = useState('');
   const [busy, setBusy] = useState(false);
+  const [shown, setShown] = useState('');
   const refresh = useCallback(() => { listAiTokens(client).then(setTokens).catch(e => { setTokens([]); say((e as Error).message); }); }, [client, say]);
   useEffect(() => { refresh(); }, [refresh]);
-  const copy = async (text: string, what: string) => { try { await navigator.clipboard.writeText(text); say(`${what}已复制`); } catch { say('复制失败，请长按选中后手动复制'); } };
+  const copy = async (text: string, what: string) => { try { await copyText(text); say(`${what}已复制`); } catch { say('复制失败，请长按选中后手动复制'); } };
   const when = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '从未';
   return (
     <div className="card">
@@ -1024,11 +1026,11 @@ function AiTokenCard({ client, userId, projectUrl, say }: { client: SupabaseClie
       <p className="muted">把令牌交给 Claude 的“昱时日程同步”技能，AI 对话里改的日程会自动进到电脑和手机。令牌只能改日程，不能登录账号；不用了随时撤销。</p>
       {fresh ? (
         <div className="stack token-fresh">
-          <p className="muted">这是新令牌，<b>只显示这一次</b>，请现在复制保存：</p>
+          <p className="muted">这是新令牌，以后在下面的列表里也能再查看：</p>
           <code className="token">{fresh}</code>
           <div className="row-btns">
             <button className="primary" onClick={() => void copy(fresh, '令牌')}><Copy size={16} />复制令牌</button>
-            <button className="secondary" onClick={() => setFresh('')}>我已保存</button>
+            <button className="secondary" onClick={() => setFresh('')}>收起</button>
           </div>
         </div>
       ) : (
@@ -1043,8 +1045,15 @@ function AiTokenCard({ client, userId, projectUrl, say }: { client: SupabaseClie
       {tokens && tokens.length > 0 && (
         <ul className="token-list">{tokens.map(token => (
           <li key={token.hash}>
-            <span><b>{token.label}</b><small>生成 {when(token.createdAt)} · 上次使用 {when(token.lastUsedAt)}</small></span>
+            <span><b>{token.label}</b><small>生成 {when(token.createdAt)} · 上次使用 {when(token.lastUsedAt)}{!token.token && ' · 生成时没有保存，看不到明文'}</small>
+              {token.token && shown === token.hash && <code className="token">{token.token}</code>}</span>
+            <span className="token-actions">
+              {token.token && <>
+                <button className="text-btn" onClick={() => setShown(shown === token.hash ? '' : token.hash)}>{shown === token.hash ? '隐藏' : '查看'}</button>
+                <button className="text-btn" onClick={() => void copy(token.token!, '令牌')}>复制</button>
+              </>}
             <button className="text-btn danger" onClick={async () => { try { await revokeAiToken(client, token.hash); say('已撤销'); refresh(); } catch (e) { say((e as Error).message); } }}>撤销</button>
+            </span>
           </li>
         ))}</ul>
       )}

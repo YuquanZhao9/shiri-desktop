@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, Notification, globalShortcut, powerMonitor, screen, shell } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, Menu, Tray, nativeImage, Notification, globalShortcut, powerMonitor, screen, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -785,6 +785,12 @@ function registerIpc() {
   handle('desktop:open-review-quick', () => openReviewQuick());
   handle('desktop:open-class-editor', (request) => openClassEditor(request));
   handle('desktop:open-weight', (date) => openWeightEditor(date));
+  // 页面权限全被拒，navigator.clipboard 用不了；复制令牌等走系统剪贴板。
+  handle('desktop:copy-text', (text) => {
+    if (typeof text !== 'string' || !text || text.length > 4000) throw new Error('要复制的内容无效。');
+    clipboard.writeText(text);
+    return { ok: true };
+  });
   ipcMain.handle('desktop:open-inline-editor', async (event, request) => {
     const testSurface = smokeTest && event.sender === mainWindow?.webContents && event.sender.getURL().endsWith('#desktop');
     if (!isTrustedFrame(event) || (event.sender !== desktopWindow?.webContents && !testSurface))

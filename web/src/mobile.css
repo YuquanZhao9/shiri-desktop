@@ -253,6 +253,9 @@ svg { flex-shrink: 0; }
 .token-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
 .token-list b { display: block; font-size: 14px; font-weight: 550; }
 .token-list small { font-size: 12px; color: var(--muted); }
+.token-list li > span:first-child { min-width: 0; }
+.token-list .token { margin-top: 6px; font-size: 12px; }
+.token-actions { display: flex; gap: 10px; flex-shrink: 0; }
 .text-btn.danger { color: var(--rest); }
 @media (prefers-color-scheme: dark) { .token { background: #262832; } }
 
