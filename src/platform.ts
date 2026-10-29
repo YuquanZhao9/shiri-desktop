@@ -38,6 +38,7 @@ declare global { interface Window { desktop?: {
   openClassEditor?(request:{slotId:string;date:string}):Promise<{ok:boolean;error?:string}>;
   openWeightEditor?(date:string):Promise<{ok:boolean;error?:string}>;
   onReviewQuickOpen?(cb:()=>void):()=>void;
+  copyText?(text:string):Promise<{ok:boolean;error?:string}>;
 } } }
 export const isNative = Capacitor.isNativePlatform();
 const pendingWrites = new Map<string, Promise<void>>();

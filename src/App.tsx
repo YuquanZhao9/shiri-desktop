@@ -23,6 +23,7 @@ import { activeGoals, addMark, autoPlanWeek, replanWeek, deleteGoal as deleteGoa
 import type { GoalMark } from './types';
 import { handleParagraphEnter, hasJournal, journalLength, journalText, JOURNAL_MAX_TEXT, spaceParagraphs, JOURNAL_REMINDER_TIME, mergeJournal, writeJournal, writtenEntries } from './journal';
 import { aiSyncUrl, createAiToken, listAiTokens, revokeAiToken } from './ai-token';
+import { copyText } from './clipboard';
 import type { AiTokenInfo } from './ai-token';
 import { readSaved, writeSaved, scheduleNative, enableNotifications, reminderQueue, isNative, MULTI_REMINDER_LEADS, leadLabel } from './platform';
 import type { DesktopSettings, CellEditorRequest } from './platform';
@@ -892,15 +893,16 @@ function AiTokenSection({client,userId,projectUrl,toast}:{client:SupabaseClient;
   const [tokens,setTokens]=useState<AiTokenInfo[]|null>(null);
   const [fresh,setFresh]=useState('');
   const [busy,setBusy]=useState(false);
+  const [shown,setShown]=useState('');
   const refresh=useCallback(()=>{listAiTokens(client).then(setTokens).catch(e=>{setTokens([]);toast((e as Error).message);});},[client,toast]);
   useEffect(()=>{refresh();},[refresh]);
-  const copy=async(text:string,what:string)=>{try{await navigator.clipboard.writeText(text);toast(`${what}已复制`);}catch{toast('复制失败，请手动选中复制');}};
+  const copy=async(text:string,what:string)=>{try{await copyText(text);toast(`${what}已复制`);}catch{toast('复制失败，请手动选中复制');}};
   const when=(iso:string|null)=>iso?new Date(iso).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'从未';
   let url='';try{url=aiSyncUrl(projectUrl);}catch{/* 未配置云项目 */}
   return <div className="settings-section ai-token-section"><h3><Cloud size={17}/>AI 同步令牌</h3>
     <p>把令牌交给 Claude 的“昱时日程同步”技能，AI 对话里改的日程会自动进到电脑和手机。令牌只能改日程、不能登录；不用了随时撤销。</p>
-    {fresh?<div className="ai-token-fresh"><p>新令牌只显示这一次，请现在复制保存：</p><code>{fresh}</code><div className="backup-buttons"><button className="primary" onClick={()=>void copy(fresh,'令牌')}>复制令牌</button><button className="secondary" onClick={()=>setFresh('')}>我已保存</button></div></div>
+    {fresh?<div className="ai-token-fresh"><p>新令牌（以后在下面的列表里也能再查看）：</p><code>{fresh}</code><div className="backup-buttons"><button className="primary" onClick={()=>void copy(fresh,'令牌')}>复制令牌</button><button className="secondary" onClick={()=>setFresh('')}>收起</button></div></div>
       :<div className="backup-buttons"><button className="secondary" disabled={busy} onClick={async()=>{setBusy(true);try{setFresh(await createAiToken(client,userId,'Claude'));refresh();}catch(e){toast((e as Error).message);}finally{setBusy(false);}}}>生成新令牌</button>{url&&<button className="secondary" onClick={()=>void copy(url,'接口地址')}>复制接口地址</button>}</div>}
-    {tokens&&tokens.length>0&&<ul className="ai-token-list">{tokens.map(token=><li key={token.hash}><span><strong>{token.label}</strong><small>生成 {when(token.createdAt)} · 上次使用 {when(token.lastUsedAt)}</small></span><button className="secondary" onClick={async()=>{try{await revokeAiToken(client,token.hash);toast('已撤销');refresh();}catch(e){toast((e as Error).message);}}}>撤销</button></li>)}</ul>}
+    {tokens&&tokens.length>0&&<ul className="ai-token-list">{tokens.map(token=><li key={token.hash}><span><strong>{token.label}</strong><small>生成 {when(token.createdAt)} · 上次使用 {when(token.lastUsedAt)}{!token.token&&' · 生成时没有保存，看不到明文'}</small>{token.token&&shown===token.hash&&<code>{token.token}</code>}</span><span className="ai-token-actions">{token.token&&<><button className="secondary" onClick={()=>setShown(shown===token.hash?'':token.hash)}>{shown===token.hash?'隐藏':'查看'}</button><button className="secondary" onClick={()=>void copy(token.token!,'令牌')}>复制</button></>}<button className="secondary" onClick={async()=>{try{await revokeAiToken(client,token.hash);toast('已撤销');refresh();}catch(e){toast((e as Error).message);}}}>撤销</button></span></li>)}</ul>}
   </div>;
 }
