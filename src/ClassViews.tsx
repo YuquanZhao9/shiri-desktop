@@ -20,7 +20,7 @@ export function ClassEditor({ title, time, date, mark, state, onSave, onClose }:
     <div className="class-status-pick" role="radiogroup" aria-label="这节课的状态">{(['done', 'todo', 'review'] as const).map(value =>
       <button key={value} type="button" role="radio" aria-checked={status === value} className={`status-${value} ${status === value ? 'on' : ''}`} onClick={() => setStatus(value)}>{CLASS_STATUS_LABEL[value]}</button>)}</div>
     <textarea autoFocus rows={3} maxLength={2000} value={note} placeholder={status === 'review' ? '要复习什么？比如：第 3 章例题、作业 2' : '备注（可选）'} onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSave(status, note); onClose(); } }} />
-    <footer><span>Ctrl+回车保存 · Esc 关闭</span><button type="button" className="secondary" onClick={onClose}>取消</button><button type="submit" className="primary">保存</button></footer>
+    <footer><span>{/Mac/i.test(navigator.platform||'')?'⌘+回车':'Ctrl+回车'}保存 · Esc 关闭</span><button type="button" className="secondary" onClick={onClose}>取消</button><button type="submit" className="primary">保存</button></footer>
   </form>;
 }
 
