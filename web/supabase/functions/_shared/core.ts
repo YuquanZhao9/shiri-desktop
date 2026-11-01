@@ -203,7 +203,8 @@ export function validateBackup(input: unknown): AppData {
     const id = idValue(item.id, '任务 ID');
     if (taskIds.has(id)) throw new Error('任务 ID 重复');
     taskIds.add(id);
-    const title = stringValue(item.title, 500, '任务名称', false);
+    // 已删除的日程只是删除记录，标题可以为空（2026-11-01 曾因空标题的删除记录让整份数据停止保存）。
+    const title = stringValue(item.title, 500, '任务名称', item.deletedAt !== undefined);
     const notes = stringValue(item.notes, 20_000, '备注');
     const date = dateValue(item.date, '任务日期', true);
     const time = stringValue(item.time, 5, '任务时间');

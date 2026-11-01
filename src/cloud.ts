@@ -184,6 +184,8 @@ function parseRemoteTasks(payloads: unknown[]): Task[] {
 export function tasksToPush(local: Task[], remote: Task[]): Task[] {
   const remoteById = new Map(remote.map(task => [task.id, task]));
   return mergeTasks(local, remote).filter(task => {
+    // 空标题只会是没保存过就删掉的草稿，不上传，旧版手机端读到会校验失败。
+    if (!task.title.trim()) return false;
     const stored = remoteById.get(task.id);
     return !stored || !sameContent(task, stored);
   });
