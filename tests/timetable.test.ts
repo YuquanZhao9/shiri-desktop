@@ -14,6 +14,12 @@ test('tasks keep an optional color tag and reject malformed colors', () => {
   assert.throws(() => validateBackup({ ...defaultData(), tasks: [{ ...task, color: 'red' }] }), /颜色/);
 });
 
+test('a deleted task may have an empty title, a live one may not', () => {
+  const removed = { ...task, title: '', updatedAt: '2026-09-28T10:00:05.000Z', deletedAt: '2026-09-28T10:00:05.000Z' };
+  assert.equal(validateBackup({ ...defaultData(), tasks: [removed] }).tasks[0].title, '');
+  assert.throws(() => validateBackup({ ...defaultData(), tasks: [{ ...task, title: ' ' }] }), /任务名称/);
+});
+
 test('the preset WS 2026/27 timetable is valid and ordered by weekday', () => {
   assert.deepEqual(validateTimetable(DEFAULT_TIMETABLE), DEFAULT_TIMETABLE);
   assert.deepEqual(slotsForWeekday(DEFAULT_TIMETABLE, 1).map(slot => slot.title), ['AR 讲课', 'MC 讲课', 'AM 讲课']);

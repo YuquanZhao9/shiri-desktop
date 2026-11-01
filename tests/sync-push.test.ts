@@ -27,6 +27,11 @@ test('日程同步只上传和云端不一样的', () => {
   assert.deepEqual(tasksToPush(remote, reordered), []);
 });
 
+test('没保存就删掉的空标题草稿不上传', () => {
+  const draft = task('e', { title: '', updatedAt: '2026-10-02T00:00:00.000Z', deletedAt: '2026-10-02T00:00:00.000Z' });
+  assert.deepEqual(tasksToPush([task('a'), draft], []).map(item => item.id), ['a']);
+});
+
 test('周次任务：只传本机更新的，云端字段顺序不同不重传', () => {
   const mark: GoalMark = { id: 'plan_g_2026-10-26_1', goalId: 'g', date: '2026-10-27', done: false, time: '10:00', auto: true, createdAt: '2026-10-26T00:00:00.000Z', updatedAt: '2026-10-26T00:00:00.000Z' };
   const fromCloud = Object.fromEntries(Object.entries(mark).sort(([a], [b]) => a.length - b.length || a.localeCompare(b))) as GoalMark;
