@@ -287,3 +287,10 @@ html.widget-preview { background: radial-gradient(ellipse at 18% 10%, #66848a 0%
 
 /* 时间写成“开始–结束”；缩略显示时只留开始时间（完整时段在悬停提示里） */
 .day-cell .cell-hours > .calendar-event.bar small, .day-cell .cell-tasks.compact > .calendar-event small { max-width:2.6em; overflow:hidden; white-space:nowrap; }
+
+/* 屏幕竖着放（旋转显示器）时：今天占满第一行，其余 6 天排成两行三列，免得 7 列挤成细条。 */
+@media (orientation: portrait) {
+  .desktop-calendar[data-span='focus'] .month-grid { grid-template-columns:repeat(3,minmax(0,1fr)) !important; grid-template-rows:minmax(0,1.3fr) repeat(2,minmax(0,1fr)); }
+  .desktop-calendar[data-span='focus'] .month-grid > .day-cell.today { grid-column:1 / -1; }
+  .desktop-calendar .timetable-strip { max-height:96px; }
+}

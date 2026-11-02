@@ -79,6 +79,8 @@ let settingsFile;
 let reminders;
 let reminderTimer;
 let modeQueue = Promise.resolve();
+let refitTimer = null;
+let lastAutoReattach = 0;
 let lastImmediateNotification = 0;
 const visibleNotifications = new Set();
 
@@ -395,6 +397,30 @@ function queueMode(next, options) {
   const operation = modeQueue.then(() => changeMode(next, options));
   modeQueue = operation.catch(() => {});
   return operation;
+}
+
+// Resolution, rotation, scaling and monitor changes resize the primary work
+// area; the pinned calendar must follow it instead of keeping its launch size.
+function scheduleDesktopRefit() {
+  clearTimeout(refitTimer);
+  // Windows sends several events while a display settles; act once it is done.
+  refitTimer = setTimeout(() => {
+    refitTimer = null;
+    const operation = modeQueue.then(async () => {
+      if (mode !== 'desktop' || !nativeState || !desktopWindow || desktopWindow.isDestroyed()) return;
+      hideCellEditor();
+      try {
+        await callDesktopHelper('place', null, widgetRect());
+      } catch {
+        // Explorer sometimes rebuilds its desktop host on these changes: pin again.
+        const managerVisible = !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible();
+        await leaveDesktop();
+        const result = await changeMode('desktop', { persist: false });
+        if (result.ok && !managerVisible && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+      }
+    });
+    modeQueue = operation.catch(() => {});
+  }, 700);
 }
 
 function queueWidgetLayout(changes) {
@@ -924,6 +950,13 @@ function integrateWithWindows() {
       });
     }
   } catch (error) { lastError = `开始菜单快捷方式未能创建：${errorMessage(error)}`; }
+  // Dev runs of electron.exe leave an Electron.lnk with the same AppUserModelId;
+  // Start then lists the app as "Electron" and searching 昱时 finds nothing.
+  try {
+    const stale = path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Electron.lnk');
+    const link = shell.readShortcutLink(stale);
+    if (link.appUserModelId === 'app.shiri.calendar' || /node_modules[\\/]electron[\\/]/i.test(link.target)) fs.unlinkSync(stale);
+  } catch { /* none there */ }
   try {
     const next = { ...settings };
     if (!settings.autostartDefaulted) { next.autostart = true; next.autostartDefaulted = true; }
@@ -994,6 +1027,13 @@ async function createWindow({ show = true, surface = 'app' } = {}) {
       nativeState = null;
       desktopHost = null;
       mode = 'window';
+      // Explorer restarts and some display changes destroy the desktop host and
+      // our calendar with it. Pin it again once; a repeat falls back to the window.
+      if (Date.now() - lastAutoReattach > 30_000) {
+        lastAutoReattach = Date.now();
+        setTimeout(() => { if (!quitting) void queueMode('desktop', { persist: false }); }, 1500);
+        return;
+      }
       lastError = '桌面环境已变化，已打开日程管理窗口。';
       void createWindow().catch((error) => { lastError = errorMessage(error); });
     }
@@ -1060,6 +1100,7 @@ if (hasLock) {
       reminderTimer = setInterval(deliverReminders, 15_000);
       powerMonitor.on('resume', deliverReminders);
       powerMonitor.on('unlock-screen', deliverReminders);
+      for (const event of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(event, scheduleDesktopRefit);
     }
     // Load invisibly, then attach/apply the preferred mode before first display.
     // Recovery recreations use createWindow() directly and never retry attachment.
